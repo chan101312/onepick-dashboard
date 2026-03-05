@@ -4,9 +4,10 @@
 TELEGRAM_TOKEN = '8701746901:AAFFikLZucBFiRUf4jMr9yo_anpyMXpW2HA'
 CHAT_ID = '7293105766'
 
-# [2] 네이버 쇼핑 검색 API 정보 (타사 가격 비교용)
-NAVER_SEARCH_CLIENT_ID = 'AdlE8wMvVxsMDEesdcDp'
-NAVER_SEARCH_CLIENT_SECRET = 'oCQcszYNW4'
+# [2] 네이버 쇼핑 검색 API 정보 (총 상품 수 조회용)
+# 🚨 401 에러를 해결할 진짜 열쇠 이름표입니다.
+NAVER_SEARCH_CLIENT_ID = '8fsdefpJXOBrtYL5L1Qx'
+NAVER_SEARCH_CLIENT_SECRET = 'y29PB6broG'
 
 # [3] 네이버 커머스 API 정보 (내 스토어 '원픽푸드마켓' 접근용)
 NAVER_COMMERCE_CLIENT_ID = '4b0WMBrWDnUpvAYyKaUvx5'
