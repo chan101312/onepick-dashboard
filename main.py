@@ -2,16 +2,28 @@ import streamlit as st
 import pandas as pd
 import requests
 
-
-
-# 분리한 naver_api.py 파일에서 필요한 무기(함수)들만 불러옵니다.
+# 💡 흩어져 있던 모든 무기를 한 번에 깔끔하게 불러옵니다!
 from naver_api import (
-    get_my_products, update_naver_price, search_competitors, 
-    get_keyword_data_with_tags, get_total_products, get_datalab_trend, 
+    get_my_products, 
+    update_naver_price, 
+    update_naver_product_name, 
+    get_top_shopping_keywords, 
+    search_competitors, 
+    get_keyword_data_with_tags, 
+    get_total_products, 
+    get_datalab_trend, 
     NAVER_COMMERCE_ID
 )
 
 st.set_page_config(page_title="원픽푸드마켓 비즈니스 대시보드", layout="wide")
+
+# --- 🚀 앱 시작 시 자동으로 상품 리스트 불러오기 ---
+if 'my_products' not in st.session_state:
+    with st.spinner('📦 네이버에서 상품 목록을 자동으로 불러오는 중...'):
+        st.session_state['my_products'] = get_my_products()
+        
+# 변수 이름 연결 (기존 코드와 호환을 위해)
+my_products = st.session_state.get('my_products', [])
 
 # 🚨 배포 사이트에서 서버 IP를 확인하기 위한 코드
 if NAVER_COMMERCE_ID:
@@ -28,9 +40,9 @@ tab1, tab2, tab3, tab4 = st.tabs(["🕵️ 실시간 최저가 & 마진", "💰 
 
 # --- 탭 1: 최저가 모니터링 & 자동 가격 수정 ---
 with tab1:
-    my_products = get_my_products()
+    # my_products = get_my_products()
     if not my_products:
-        st.error("상품을 불러오지 못했습니다. 키 설정을 확인하세요.")
+        st.error("상품 목록이 없습니다. 첫 로딩을 기다리거나 설정을 확인하세요.")
     else:
         if 'previous_product' not in st.session_state:
             st.session_state.previous_product = None
@@ -138,50 +150,79 @@ with tab2:
 
 # --- 탭 3: 시즌 트렌드 (데이터랩) ---
 with tab3:
-    st.markdown("### 📈 최근 1년 계절별 검색 트렌드")
-    trend_keyword = st.text_input("트렌드를 확인할 상품명 입력", placeholder="예: 냉동연어")
-    if st.button("트렌드 차트 보기 📊"):
-        if trend_keyword:
-            with st.spinner('네이버 데이터랩을 조회 중입니다...'):
-                trend_df = get_datalab_trend(trend_keyword)
-                if not trend_df.empty: st.line_chart(trend_df, height=400)
-                else: st.warning("트렌드 데이터를 찾을 수 없습니다.")
-# --- 탭 4: SEO 상품명 최적화 ---
-with tab4:
-    st.markdown("### 📝 네이버 SEO 맞춤 상품명 생성기")
-    st.info("💡 **네이버 SEO 핵심 공식:** 50자 이내 + 특수문자 금지 + 브랜드/핵심키워드 전진 배치")
-
-    col1, col2 = st.columns([1, 1])
+    st.markdown("### 📈 실시간 네이버 식품 카테고리 트렌드")
     
-    with col1:
-        st.markdown("#### 🧱 키워드 조립")
-        brand = st.text_input("🏷️ 브랜드/제조사 (가장 앞)", value="원픽푸드마켓")
-        main_kw = st.text_input("🎯 메인 키워드 (예: 냉동연어)")
-        sub_kw = st.text_input("곁들일 서브 키워드 (예: 노르웨이 횟감용 500g 1kg)")
-        
-    with col2:
-        st.markdown("#### ✨ 완성된 상품명 미리보기")
-        # 입력된 단어들을 조합하고 불필요한 띄어쓰기 제거
-        raw_name = f"{brand} {main_kw} {sub_kw}".strip()
-        final_name = " ".join(raw_name.split())
-        name_length = len(final_name)
-
-        # 완성된 이름 크게 보여주기
-        st.code(final_name if final_name else "키워드를 입력해보세요!", language="plaintext")
-
-        # 1. 글자 수 검사 (50자 기준)
-        if name_length == 0:
-            st.write("")
-        elif name_length <= 50:
-            st.success(f"✅ 글자 수 완벽합니다! ({name_length}/50 자)")
-        else:
-            st.error(f"🚨 50자를 초과했습니다! 뒤쪽 서브 키워드를 줄여주세요. ({name_length}/50 자)")
-
-        # 2. 특수문자 검사 정규식
-        import re
-        if re.search(r'[^a-zA-Z0-9가-힣\s]', final_name):
-            st.warning("⚠️ 특수문자(괄호, 쉼표 등)가 포함되어 있습니다. 네이버 검색 노출에 감점이 될 수 있으니 빼는 것을 권장합니다.")
+    col_t1, col_t2 = st.columns([1, 2])
+    
+    with col_t1:
+        st.markdown("#### 🔥 지금 뜨는 식품 TOP 15")
+        with st.spinner('실시간 랭킹을 집계 중입니다...'):
+            # API에서 진짜 데이터를 가져옵니다.
+            real_trending_kw = get_top_shopping_keywords("50000000") # 식품 카테고리 ID
             
+            for i, kw in enumerate(real_trending_kw):
+                # 클릭하면 바로 오른쪽 검색창에 입력되게 만드는 꿀팁!
+                if st.button(f"{i+1}. {kw}", key=f"kw_{i}"):
+                    st.session_state['target_kw'] = kw
+
+        st.caption("💡 키워드를 클릭하면 우측 차트가 즉시 업데이트됩니다.")
+
+    with col_t2:
+        st.markdown("#### 📊 키워드 검색량 추세 (최근 1년)")
+        # 세션 상태에서 키워드 가져오기 (없으면 기본값 '냉동연어')
+        default_kw = st.session_state.get('target_kw', "냉동연어")
+        search_kw = st.text_input("분석할 키워드 직접 입력", value=default_kw)
+        
+        if st.button("트렌드 분석 시작 🚀", key="analyze_btn"):
+            with st.spinner(f"'{search_kw}' 데이터 분석 중..."):
+                df = get_datalab_trend(search_kw)
+                if not df.empty:
+                    st.line_chart(df, height=400)
+                    st.success(f"✅ '{search_kw}' 키워드는 현재 이런 흐름을 보이고 있습니다.")
+                else:
+                    st.error("데이터를 불러오지 못했습니다. 키워드를 확인해 주세요.")
+
+with tab4:
+    st.markdown("### 📝 내 상품명 실시간 SEO 최적화")
+    
+    # 이제 my_products가 자동으로 로드되므로 바로 목록을 보여줍니다.
+    if my_products:
+        prod_map = {p['name']: p for p in my_products}
+        selected_prod_name = st.selectbox("📦 수정할 상품 선택", list(prod_map.keys()), key="seo_select")
+        selected_prod = prod_map[selected_prod_name]
+
         st.divider()
-        st.button("🚀 이 이름으로 내 상품명 바로 변경하기 (준비 중)")
-                
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.markdown("#### 🧱 키워드 편집")
+            new_title = st.text_area("새로운 상품명 입력", value=selected_prod_name, height=100)
+            
+        with col2:
+            st.markdown("#### ✨ SEO 검사 및 미리보기")
+            clean_name = " ".join(new_title.split()).strip()
+            name_len = len(clean_name)
+
+            if name_len <= 50:
+                st.success(f"✅ 글자 수 적당함: {name_len}/50자")
+            else:
+                st.error(f"🚨 50자 초과! 네이버 검색 누락 위험: {name_len}/50자")
+
+            import re
+            if re.search(r'[^a-zA-Z0-9가-힣\s]', clean_name):
+                st.warning("⚠️ 특수문자 제거 권장 (괄호, 쉼표 등)")
+            
+            if st.button("🚀 네이버 스토어에 즉시 반영하기", type="primary", width='stretch'):
+                if name_len > 50:
+                    st.error("50자가 넘으면 반영할 수 없습니다. 이름을 줄여주세요!")
+                else:
+                    with st.spinner("네이버 서버에 업데이트 중..."):
+                        success, msg = update_naver_product_name(selected_prod['channelProductNo'], clean_name)
+                        if success:
+                            st.toast("✅ 반영 성공!", icon="🚀")
+                            st.balloons()
+                        else:
+                            # 💡 여기서 "범인: [필드명] -> 메시지"가 출력됩니다!
+                            st.error(f"❌ {msg}")
+    else:
+        st.error("상품 목록을 불러올 수 없습니다. API 설정이나 IP 등록 상태를 확인해주세요.")
