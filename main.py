@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 
+
+
 # 분리한 naver_api.py 파일에서 필요한 무기(함수)들만 불러옵니다.
 from naver_api import (
     get_my_products, update_naver_price, search_competitors, 
@@ -21,7 +23,8 @@ if NAVER_COMMERCE_ID:
 st.title("👨‍💼 원픽푸드마켓 올인원 비즈니스 보드")
 st.caption("최저가 방어부터 트렌드 분석, 자동 가격 인하까지 한 번에!")
 
-tab1, tab2, tab3 = st.tabs(["🕵️ 실시간 최저가 & 마진", "💰 황금 키워드 & 해시태그", "📈 시즌 트렌드 (데이터랩)"])
+# 기존 코드를 찾아서 아래처럼 tab4를 추가해 주세요.
+tab1, tab2, tab3, tab4 = st.tabs(["🕵️ 실시간 최저가 & 마진", "💰 황금 키워드 & 해시태그", "📈 시즌 트렌드", "📝 SEO 상품명 최적화"])
 
 # --- 탭 1: 최저가 모니터링 & 자동 가격 수정 ---
 with tab1:
@@ -143,3 +146,42 @@ with tab3:
                 trend_df = get_datalab_trend(trend_keyword)
                 if not trend_df.empty: st.line_chart(trend_df, height=400)
                 else: st.warning("트렌드 데이터를 찾을 수 없습니다.")
+# --- 탭 4: SEO 상품명 최적화 ---
+with tab4:
+    st.markdown("### 📝 네이버 SEO 맞춤 상품명 생성기")
+    st.info("💡 **네이버 SEO 핵심 공식:** 50자 이내 + 특수문자 금지 + 브랜드/핵심키워드 전진 배치")
+
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("#### 🧱 키워드 조립")
+        brand = st.text_input("🏷️ 브랜드/제조사 (가장 앞)", value="원픽푸드마켓")
+        main_kw = st.text_input("🎯 메인 키워드 (예: 냉동연어)")
+        sub_kw = st.text_input("곁들일 서브 키워드 (예: 노르웨이 횟감용 500g 1kg)")
+        
+    with col2:
+        st.markdown("#### ✨ 완성된 상품명 미리보기")
+        # 입력된 단어들을 조합하고 불필요한 띄어쓰기 제거
+        raw_name = f"{brand} {main_kw} {sub_kw}".strip()
+        final_name = " ".join(raw_name.split())
+        name_length = len(final_name)
+
+        # 완성된 이름 크게 보여주기
+        st.code(final_name if final_name else "키워드를 입력해보세요!", language="plaintext")
+
+        # 1. 글자 수 검사 (50자 기준)
+        if name_length == 0:
+            st.write("")
+        elif name_length <= 50:
+            st.success(f"✅ 글자 수 완벽합니다! ({name_length}/50 자)")
+        else:
+            st.error(f"🚨 50자를 초과했습니다! 뒤쪽 서브 키워드를 줄여주세요. ({name_length}/50 자)")
+
+        # 2. 특수문자 검사 정규식
+        import re
+        if re.search(r'[^a-zA-Z0-9가-힣\s]', final_name):
+            st.warning("⚠️ 특수문자(괄호, 쉼표 등)가 포함되어 있습니다. 네이버 검색 노출에 감점이 될 수 있으니 빼는 것을 권장합니다.")
+            
+        st.divider()
+        st.button("🚀 이 이름으로 내 상품명 바로 변경하기 (준비 중)")
+                
