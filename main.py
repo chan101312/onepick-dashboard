@@ -84,8 +84,9 @@ with tab1:
                         target_new_price = lowest_price - 10
                         
                         def apply_real_price_cut():
-                            # ⚡ [핵심 수정] channelProductNo가 아니라 originProductNo를 넘겨주어야 합니다!
-                            success, msg = update_naver_price(target_prod['originProductNo'], target_new_price)
+                            # ⚡ 다시 channelProductNo를 넘겨주도록 원상복구!
+                            success, msg = update_naver_price(target_prod['channelProductNo'], target_new_price)
+                            
                             st.session_state.update_success = success
                             st.session_state.update_msg = msg
                             st.session_state.show_success_alert = True
