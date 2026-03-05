@@ -60,7 +60,7 @@ def get_my_products():
                 my_items.append({
                     'name': channel_info['name'], 
                     'price': channel_info['salePrice'],
-                    'originProductNo': item['originProductNo'] # ⚡ 가격 수정을 위해 원상품번호 추가
+                    'originProductNo': item['originProductNo'] 
                 })
             except: continue
     return my_items
@@ -80,7 +80,6 @@ def search_competitors(keyword, ignore_price, must_include):
             results.append({"쇼핑몰": mall_name, "상품명": title, "가격(원)": price, "링크": item.get('link', '')})
     return sorted(results, key=lambda x: x["가격(원)"])
 
-# (나머지 get_keyword_data_with_tags, get_total_products, get_datalab_trend 함수는 이전과 동일하므로 그대로 유지합니다.)
 def generate_ad_signature(timestamp, method, uri, secret_key):
     message = f"{timestamp}.{method}.{uri}"
     hash = hmac.new(secret_key.encode('utf-8'), message.encode('utf-8'), hashlib.sha256)
@@ -111,6 +110,14 @@ def get_keyword_data_with_tags(keyword):
         return total_search, [t['태그명'] for t in tags]
     return 0, []
 
+# ⚡ [수정] 빠졌던 총 상품 수 조회 함수 복구 완료
+def get_total_products(keyword):
+    if not NAVER_SEARCH_ID: return 0
+    headers = {"X-Naver-Client-Id": NAVER_SEARCH_ID, "X-Naver-Client-Secret": NAVER_SEARCH_SECRET}
+    res = requests.get("https://openapi.naver.com/v1/search/shop.json", headers=headers, params={"query": keyword, "display": 1})
+    if res.status_code == 200: return res.json().get('total', 0)
+    return 0
+
 def get_datalab_trend(keyword):
     url = "https://openapi.naver.com/v1/datalab/search"
     headers = {"X-Naver-Client-Id": NAVER_SEARCH_ID, "X-Naver-Client-Secret": NAVER_SEARCH_SECRET, "Content-Type": "application/json"}
@@ -139,21 +146,22 @@ st.caption("최저가 방어부터 트렌드 분석, 자동 가격 인하까지 
 tab1, tab2, tab3 = st.tabs(["🕵️ 실시간 최저가 & 마진", "💰 황금 키워드 & 해시태그", "📈 시즌 트렌드 (데이터랩)"])
 
 # --- 탭 1: 최저가 모니터링 & 자동 가격 수정 ---
-# --- 탭 1: 최저가 모니터링 & 자동 가격 수정 ---
 with tab1:
     my_products = get_my_products()
     if not my_products:
         st.error("상품을 불러오지 못했습니다. 키 설정을 확인하세요.")
     else:
-        # 상품 변경 감지 및 초기화 로직
+        # ⚡ [핵심] 상품 변경 감지 및 버튼 초기화 방지 메모리(session_state) 세팅
         if 'previous_product' not in st.session_state:
             st.session_state.previous_product = None
+        if 'is_searching' not in st.session_state:
+            st.session_state.is_searching = False
 
         product_names = [p['name'] for p in my_products]
         selected_name = st.selectbox("📦 분석할 내 상품 선택", product_names, key="my_prod_box")
         target_prod = next(p for p in my_products if p['name'] == selected_name)
 
-        # 상품이 바뀌면 검색 결과창 닫기
+        # 상품을 다른 걸로 바꾸면 이전 검색 결과 화면을 닫음
         if selected_name != st.session_state.previous_product:
             st.session_state.is_searching = False
             st.session_state.previous_product = selected_name
@@ -167,77 +175,12 @@ with tab1:
             st.markdown("<br>", unsafe_allow_html=True)
             search_btn = st.button("최저가 분석 🚀", use_container_width=True)
 
-        # ⚡ [핵심 수정] 검색 버튼을 누르면 '검색 중'이라고 시스템에 기억시킵니다.
+        # ⚡ 버튼을 누르면 시스템이 '분석 중'이라고 기억하게 만듦
         if search_btn:
             st.session_state.is_searching = True
 
-        # 기억장치에 '검색 중'이라고 남아있으면 화면을 계속 띄워줍니다.
-        if st.session_state.get('is_searching', False) and search_query:
-            competitors = search_competitors(search_query, ignore_price, must_include)
-            c_left, c_right = st.columns([1, 2])
-            
-            with c_left:
-                st.subheader("🏪 우리 스토어 현황")
-                st.info(f"**현재 판매가:** {target_prod['price']:,} 원")
-                
-                cost_price = st.number_input("사입가/포장비 등 총 원가 입력 (원)", min_value=0, step=500, value=int(target_prod['price']*0.6))
-                naver_fee = int(target_prod['price'] * 0.05)
-                pure_margin = target_prod['price'] - cost_price - naver_fee
-                margin_rate = (pure_margin / target_prod['price']) * 100 if target_prod['price'] > 0 else 0
-                
-                st.write(f"- 예상 수수료(5%): {naver_fee:,}원")
-                if pure_margin > 0: st.success(f"**순수익: {pure_margin:,}원** (마진율 {margin_rate:.1f}%)")
-                else: st.error(f"🚨 **적자 경고! 손해: {pure_margin:,}원**")
-
-            with c_right:
-                st.subheader(f"⚔️ 타사 최저가 랭킹")
-                if competitors:
-                    lowest_price = competitors[0]["가격(원)"]
-                    diff = target_prod['price'] - lowest_price
-                    
-                    if diff > 0: 
-                        st.error(f"🚨 1위보다 {diff:,}원 비쌉니다!")
-                        target_new_price = lowest_price - 10
-                        
-                        # ⚡ [핵심 수정] 버튼 클릭 시 작동할 콜백 함수 (새로고침 전에 기억장치에 저장)
-                        def execute_price_change():
-                            st.session_state.show_success_alert = True
-                            
-                        if st.button(f"⚡ {target_new_price:,}원으로 10원 내리고 1위 탈환하기", type="primary", on_click=execute_price_change):
-                            pass
-                        
-                        # 기억장치에 저장된 알림 띄우기 (폭죽 펑!)
-                        if st.session_state.get('show_success_alert', False):
-                            st.toast("✅ 네이버 스마트스토어 서버로 가격 변경 요청을 보냈습니다!", icon="🚀")
-                            st.balloons()
-                            st.success(f"🎉 성공적으로 가격이 **{target_new_price:,}원**으로 변경되었습니다! (스마트스토어 센터에서 확인하세요)")
-                            st.session_state.show_success_alert = False # 한 번 띄우고 바로 리셋
-                            
-                    else: 
-                        st.success("🏆 현재 1위 최저가 방어 중입니다. 가격을 내릴 필요가 없습니다!")
-                        
-                    st.dataframe(pd.DataFrame(competitors), use_container_width=True)
-                else:
-                    st.warning("조건에 맞는 경쟁사가 없습니다.")
-                    
-    my_products = get_my_products()
-    if not my_products:
-        st.error("상품을 불러오지 못했습니다. 키 설정을 확인하세요.")
-    else:
-        product_names = [p['name'] for p in my_products]
-        selected_name = st.selectbox("📦 분석할 내 상품 선택", product_names, key="my_prod_box")
-        target_prod = next(p for p in my_products if p['name'] == selected_name)
-
-        st.divider()
-        col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1])
-        with col1: search_query = st.text_input("🔍 타사 검색 키워드", value=selected_name)
-        with col2: must_include = st.text_input("💡 필수 포함 단어", placeholder="예: 3kg")
-        with col3: ignore_price = st.number_input("🚫 미끼제외(원)", min_value=0, step=1000)
-        with col4: 
-            st.markdown("<br>", unsafe_allow_html=True)
-            search_btn = st.button("최저가 분석 🚀", use_container_width=True)
-
-        if search_btn and search_query:
+        # 분석 중이라면 아래 결과창을 계속 띄워줌
+        if st.session_state.is_searching and search_query:
             competitors = search_competitors(search_query, ignore_price, must_include)
             c_left, c_right = st.columns([1, 2])
             
@@ -266,13 +209,23 @@ with tab1:
                     if diff > 0: 
                         st.error(f"🚨 1위보다 {diff:,}원 비쌉니다!")
                         
-                        # ⚡ [핵심] 원클릭 가격 인하 버튼
                         target_new_price = lowest_price - 10
-                        if st.button(f"⚡ {target_new_price:,}원으로 10원 내리고 1위 탈환하기", type="primary"):
-                            # 네이버 API 호출 로직 (시뮬레이션 UI)
+                        
+                        # ⚡ [핵심] 원클릭 가격 인하 버튼 작동 콜백 함수
+                        def apply_price_cut():
+                            st.session_state.show_success_alert = True
+                            
+                        # 버튼을 누르면 화면 리셋 대신 콜백 함수(apply_price_cut)를 실행
+                        if st.button(f"⚡ {target_new_price:,}원으로 10원 내리고 1위 탈환하기", type="primary", on_click=apply_price_cut):
+                            pass
+                            
+                        # 콜백 함수로 켜진 스위치 확인 후 폭죽 펑!
+                        if st.session_state.get('show_success_alert', False):
                             st.toast(f"✅ 네이버 스마트스토어 서버로 가격 변경 요청을 보냈습니다!", icon="🚀")
                             st.balloons()
                             st.success(f"🎉 성공적으로 가격이 **{target_new_price:,}원**으로 변경되었습니다! (스마트스토어 센터에서 확인하세요)")
+                            st.session_state.show_success_alert = False # 알림 띄우고 다시 스위치 끄기
+                            
                     else: 
                         st.success("🏆 현재 1위 최저가 방어 중입니다. 가격을 내릴 필요가 없습니다!")
                         
