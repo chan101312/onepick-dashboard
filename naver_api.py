@@ -64,8 +64,8 @@ def get_my_products():
             except: continue
     return my_items
 
-# ⚡ [수정 완료] 채널 상품이 아니라 '원상품(origin-products)' 창구로 정확히 찾아갑니다!
-def update_naver_price(origin_product_no, new_price):
+# ⚡ [진짜 최종 해결] 채널 창구로 가서 원상품 가격을 수정합니다!
+def update_naver_price(channel_product_no, new_price):
     timestamp = str(int(time.time() * 1000))
     password = f"{NAVER_COMMERCE_ID}_{timestamp}"
     hashed_pw = bcrypt.hashpw(password.encode('utf-8'), NAVER_COMMERCE_SECRET.encode('utf-8'))
@@ -79,28 +79,25 @@ def update_naver_price(origin_product_no, new_price):
     
     headers = {"Authorization": f"Bearer {token}"}
     
-    # 🎯 핵심 변경 포인트: /origin-products/ 주소로 호출!
-    url_product = f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_product_no}"
+    # 🎯 다시 채널상품(channel-products) 창구로 찾아갑니다!
+    url_product = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
     res_get = requests.get(url_product, headers=headers)
     if res_get.status_code != 200: return False, f"상품 정보 로드 실패: {res_get.status_code}"
     
     product_data = res_get.json()
     
+    # 🎯 봉투 안의 '원상품 가격'을 새 가격으로 교체!
     try:
-        if 'originProduct' in product_data:
-            product_data['originProduct']['salePrice'] = new_price
-        else:
-            product_data['salePrice'] = new_price
+        product_data['originProduct']['salePrice'] = new_price
     except KeyError:
         return False, "가격 정보를 찾을 수 없는 상품 구조입니다."
         
     headers["Content-Type"] = "application/json"
     res_put = requests.put(url_product, headers=headers, json=product_data)
     
-    if res_put.status_code == 200: 
-        return True, "가격 수정 완료"
-    else: 
-        return False, f"실패 사유: {res_put.json().get('message', '알 수 없는 오류')}"
+    if res_put.status_code == 200: return True, "가격 수정 완료"
+    else: return False, f"실패 사유: {res_put.json().get('message', '알 수 없는 오류')}"
+
 def search_competitors(keyword, ignore_price, must_include):
     if not NAVER_SEARCH_ID: return []
     url = "https://openapi.naver.com/v1/search/shop.json"
