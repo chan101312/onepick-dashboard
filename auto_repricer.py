@@ -60,10 +60,52 @@ def get_my_products():
                 my_items.append({
                     'name': channel_info['name'], 
                     'price': channel_info['salePrice'],
-                    'originProductNo': item['originProductNo'] 
+                    'originProductNo': item['originProductNo'],
+                    'channelProductNo': channel_info['channelProductNo'] # ⚡ 가격 수정을 위한 필수 고유 번호 추가
                 })
             except: continue
     return my_items
+
+# ⚡ [핵심] 실제 네이버 서버에 가격 수정을 요청하는 함수
+def update_naver_price(channel_product_no, new_price):
+    # 1. 신선한 토큰 재발급 (수정 작업은 보안이 철저해서 방금 발급받은 토큰이 안전합니다)
+    timestamp = str(int(time.time() * 1000))
+    password = f"{NAVER_COMMERCE_ID}_{timestamp}"
+    hashed_pw = bcrypt.hashpw(password.encode('utf-8'), NAVER_COMMERCE_SECRET.encode('utf-8'))
+    client_secret_sign = base64.standard_b64encode(hashed_pw).decode('utf-8')
+    
+    url_token = "https://api.commerce.naver.com/external/v1/oauth2/token"
+    data = {"client_id": NAVER_COMMERCE_ID, "timestamp": timestamp, "client_secret_sign": client_secret_sign, "grant_type": "client_credentials", "type": "SELF"}
+    res_token = requests.post(url_token, data=data)
+    if res_token.status_code != 200: return False, "API 인증 실패"
+    token = res_token.json().get('access_token')
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # 2. 내 상품 정보 100% 가져오기 (GET)
+    url_product = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
+    res_get = requests.get(url_product, headers=headers)
+    if res_get.status_code != 200: return False, f"상품 정보 로드 실패: {res_get.status_code}"
+    
+    product_data = res_get.json()
+    
+    # 3. 가격 데이터만 살짝 바꾸기
+    try:
+        product_data['salePrice'] = new_price
+    except KeyError:
+        return False, "가격 정보를 찾을 수 없는 상품 구조입니다."
+        
+    # 4. 바꾼 정보를 통째로 네이버에 덮어쓰기 (PUT)
+    headers["Content-Type"] = "application/json"
+    res_put = requests.put(url_product, headers=headers, json=product_data)
+    
+    if res_put.status_code == 200:
+        return True, "가격 수정 완료"
+    else:
+        # 실패할 경우 원인 파악을 위해 네이버가 주는 에러 메시지를 그대로 반환합니다
+        error_msg = res_put.json().get('message', '알 수 없는 오류')
+        return False, f"실패 사유: {error_msg}"
+
 
 def search_competitors(keyword, ignore_price, must_include):
     if not NAVER_SEARCH_ID: return []
@@ -110,7 +152,6 @@ def get_keyword_data_with_tags(keyword):
         return total_search, [t['태그명'] for t in tags]
     return 0, []
 
-# ⚡ [수정] 빠졌던 총 상품 수 조회 함수 복구 완료
 def get_total_products(keyword):
     if not NAVER_SEARCH_ID: return 0
     headers = {"X-Naver-Client-Id": NAVER_SEARCH_ID, "X-Naver-Client-Secret": NAVER_SEARCH_SECRET}
@@ -151,7 +192,6 @@ with tab1:
     if not my_products:
         st.error("상품을 불러오지 못했습니다. 키 설정을 확인하세요.")
     else:
-        # ⚡ [핵심] 상품 변경 감지 및 버튼 초기화 방지 메모리(session_state) 세팅
         if 'previous_product' not in st.session_state:
             st.session_state.previous_product = None
         if 'is_searching' not in st.session_state:
@@ -161,7 +201,6 @@ with tab1:
         selected_name = st.selectbox("📦 분석할 내 상품 선택", product_names, key="my_prod_box")
         target_prod = next(p for p in my_products if p['name'] == selected_name)
 
-        # 상품을 다른 걸로 바꾸면 이전 검색 결과 화면을 닫음
         if selected_name != st.session_state.previous_product:
             st.session_state.is_searching = False
             st.session_state.previous_product = selected_name
@@ -175,11 +214,9 @@ with tab1:
             st.markdown("<br>", unsafe_allow_html=True)
             search_btn = st.button("최저가 분석 🚀", use_container_width=True)
 
-        # ⚡ 버튼을 누르면 시스템이 '분석 중'이라고 기억하게 만듦
         if search_btn:
             st.session_state.is_searching = True
 
-        # 분석 중이라면 아래 결과창을 계속 띄워줌
         if st.session_state.is_searching and search_query:
             competitors = search_competitors(search_query, ignore_price, must_include)
             c_left, c_right = st.columns([1, 2])
@@ -188,7 +225,6 @@ with tab1:
                 st.subheader("🏪 우리 스토어 현황")
                 st.info(f"**현재 판매가:** {target_prod['price']:,} 원")
                 
-                # 🩸 마진 계산기
                 cost_price = st.number_input("사입가/포장비 등 총 원가 입력 (원)", min_value=0, step=500, value=int(target_prod['price']*0.6))
                 naver_fee = int(target_prod['price'] * 0.05)
                 pure_margin = target_prod['price'] - cost_price - naver_fee
@@ -208,23 +244,30 @@ with tab1:
                     
                     if diff > 0: 
                         st.error(f"🚨 1위보다 {diff:,}원 비쌉니다!")
-                        
                         target_new_price = lowest_price - 10
                         
-                        # ⚡ [핵심] 원클릭 가격 인하 버튼 작동 콜백 함수
-                        def apply_price_cut():
+                        # ⚡ [핵심] 실제 서버로 가격 수정을 요청하는 콜백 함수
+                        def apply_real_price_cut():
+                            # 버튼이 눌리면 이 코드가 실행됩니다
+                            success, msg = update_naver_price(target_prod['channelProductNo'], target_new_price)
+                            st.session_state.update_success = success
+                            st.session_state.update_msg = msg
                             st.session_state.show_success_alert = True
                             
-                        # 버튼을 누르면 화면 리셋 대신 콜백 함수(apply_price_cut)를 실행
-                        if st.button(f"⚡ {target_new_price:,}원으로 10원 내리고 1위 탈환하기", type="primary", on_click=apply_price_cut):
+                        if st.button(f"⚡ {target_new_price:,}원으로 진짜 10원 내리기", type="primary", on_click=apply_real_price_cut):
                             pass
                             
-                        # 콜백 함수로 켜진 스위치 확인 후 폭죽 펑!
+                        # 결과 알림창 띄우기
                         if st.session_state.get('show_success_alert', False):
-                            st.toast(f"✅ 네이버 스마트스토어 서버로 가격 변경 요청을 보냈습니다!", icon="🚀")
-                            st.balloons()
-                            st.success(f"🎉 성공적으로 가격이 **{target_new_price:,}원**으로 변경되었습니다! (스마트스토어 센터에서 확인하세요)")
-                            st.session_state.show_success_alert = False # 알림 띄우고 다시 스위치 끄기
+                            if st.session_state.get('update_success'):
+                                st.toast("✅ 네이버 스마트스토어 반영 완료!", icon="🚀")
+                                st.balloons()
+                                st.success(f"🎉 성공! 현재 스토어 가격이 **{target_new_price:,}원**으로 변경되었습니다.")
+                                get_my_products.clear() # 캐시를 삭제해서 바뀐 새 가격을 바로 불러옵니다
+                            else:
+                                st.error(f"🚨 수정 실패: {st.session_state.get('update_msg')}")
+                            
+                            st.session_state.show_success_alert = False # 알림 초기화
                             
                     else: 
                         st.success("🏆 현재 1위 최저가 방어 중입니다. 가격을 내릴 필요가 없습니다!")
