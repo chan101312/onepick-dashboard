@@ -1,7 +1,11 @@
-streamlit
+fastapi
+uvicorn[standard]
+python-multipart
+pymysql
 requests
 bcrypt
 pandas
+openpyxl
 
 
 

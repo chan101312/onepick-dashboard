@@ -1,2 +1,15 @@
-# .gitignore 파일 내용
+# Local secrets
 config.py
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local data artifacts
+uploads/
+*.csv
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vercel

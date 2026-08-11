@@ -1,0 +1,87 @@
+import { useState } from 'react';
+import './App.css';
+import KeywordTab from './components/KeywordTab';
+import ProductSeoTab from './components/ProductSeoTab';
+import MarginTab from './components/MarginTab';
+import NaverUploadTab from './components/NaverUploadTab';
+import EsanginStock from './components/EsanginStock'; 
+import { useTheme } from './ThemeContext.jsx'; 
+
+function App() {
+  const [activeTab, setActiveTab] = useState('keyword');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+
+  const navItems = [
+    { key: 'keyword', label: '황금 키워드', icon: '🔎' },
+    { key: 'seo', label: '상품명 SEO', icon: '🏷️' },
+    { key: 'margin', label: '마진 산출 장부', icon: '📊' },
+    { key: 'esangin', label: 'E상인 재고', icon: '🦅' },
+  ];
+
+  return (
+    <>
+      <div className="appShell">
+        <aside className="sidebar">
+          <div className="brand">
+            <div>
+              <div className="brandTitle">ONEPICK Dashboard</div>
+              <div className="brandSub">Margin · Naver · Stock</div>
+            </div>
+          </div>
+
+          <nav className="nav">
+            {navItems.map((item) => (
+              <button
+                key={item.key}
+                className={`navBtn ${activeTab === item.key ? 'navBtnActive' : ''}`}
+                onClick={() => setActiveTab(item.key)}
+              >
+                <span aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="main">
+          <header className="topbar">
+            <div>
+              <div className="topbarTitle">
+                {navItems.find((x) => x.key === activeTab)?.label || 'Dashboard'}
+              </div>
+              <div className="topbarMeta">실시간 연동 · 안정성 개선 · 밝은 UI</div>
+            </div>
+            <div className="toolbar">
+              <button className="btn" onClick={toggleTheme}>
+                {theme === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드'}
+              </button>
+              {/* <button className="btn" onClick={() => setIsDrawerOpen((v) => !v)}>
+                {isDrawerOpen ? '패널 닫기' : '패널 열기'}
+              </button> */}
+              {/* <button className="btn btnPrimary" onClick={() => setActiveTab('margin')}>
+                빠른 이동: 마진
+              </button> */}
+            </div>
+          </header>
+
+          <section className="content">
+            {activeTab === 'keyword' && <KeywordTab />}
+            {activeTab === 'seo' && <ProductSeoTab />}
+            {activeTab === 'margin' && <MarginTab />}
+            {activeTab === 'esangin' && <EsanginStock />}
+          </section>
+        </main>
+      </div>
+
+      {isDrawerOpen && <div className="scrim" onClick={() => setIsDrawerOpen(false)} />}
+      <div className={`drawer ${isDrawerOpen ? 'drawerOpen' : ''}`}>
+        <div className="drawerInner">
+          <NaverUploadTab onClose={() => setIsDrawerOpen(false)} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default App;
