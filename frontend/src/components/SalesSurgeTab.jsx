@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
 import Pagination from './Pagination';
+import { Emoji } from './Icons';
 
 const SEVERITY_CONFIG = {
-  notable: { icon: '🟢', label: '주목', bg: 'rgba(74, 222, 128, 0.14)', border: '#4ade80', text: '#16a34a' },
+  notable: { icon: '🟢', label: '주목', bg: 'color-mix(in srgb, var(--success) 14%, transparent)', border: 'var(--success)', text: 'var(--success)' },
   high: { icon: '📈', label: '급증', bg: 'rgba(34, 197, 94, 0.14)', border: '#22c55e', text: '#15803d' },
-  explosive: { icon: '🚀', label: '폭발적', bg: 'rgba(22, 163, 74, 0.16)', border: '#16a34a', text: '#166534' },
+  explosive: { icon: '🚀', label: '폭발적', bg: 'color-mix(in srgb, var(--success) 16%, transparent)', border: 'var(--success)', text: '#166534' },
 };
 
 const SORT_OPTIONS = [
@@ -82,7 +83,7 @@ export default function SalesSurgeTab() {
     return (
       <div className="reorder-alert-wrap">
         <div className="reorder-status-row reorder-status-empty">
-          <span>📈 {errorMsg}</span>
+          <span><Emoji>📈</Emoji> {errorMsg}</span>
         </div>
       </div>
     );
@@ -97,10 +98,10 @@ export default function SalesSurgeTab() {
     <div className="reorder-alert-wrap">
       <div className="reorder-status-row reorder-status-ok">
         <span>
-          📈 {lastMonth} → {thisMonth} 판매 비교
+          <Emoji>📈</Emoji> {lastMonth} → {thisMonth} 판매 비교
         </span>
         <button className="reorder-refresh-btn" onClick={fetchData} disabled={isLoading}>
-          {isLoading ? '🔄 확인 중...' : '🔄 새로고침'}
+          {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
         </button>
       </div>
 
@@ -134,7 +135,7 @@ export default function SalesSurgeTab() {
                 style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
               >
                 <div className="reorder-alert-msg">
-                  <span className="reorder-alert-icon">{cfg.icon}</span>
+                  <span className="reorder-alert-icon"><Emoji>{cfg.icon}</Emoji></span>
                   <div className="reorder-alert-body">
                     <span className="reorder-alert-text" style={{ color: cfg.text }}>
                       [{item.product_name}]

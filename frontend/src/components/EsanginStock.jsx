@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 function EsanginStock({ menuType = 'stock' }) {
   const [stockList, setStockList] = useState([]);
@@ -244,8 +245,8 @@ function EsanginStock({ menuType = 'stock' }) {
     }
   };
 
-  if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: themeColors.text }}>데이터를 똑똑하게 불러오는 중입니다... 🚀</div>;
-  if (error) return <div style={{ color: '#ff4d4f', padding: '20px' }}>❌ 에러 발생: {error}</div>;
+  if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: themeColors.text }}>데이터를 똑똑하게 불러오는 중입니다... <Emoji>🚀</Emoji></div>;
+  if (error) return <div style={{ color: 'var(--danger)', padding: '20px' }}><Emoji>❌</Emoji> 에러 발생: {error}</div>;
 
   return (
     <div style={{ padding: '20px', color: themeColors.text, transition: 'all 0.3s ease', boxSizing: 'border-box' }}>
@@ -254,8 +255,8 @@ function EsanginStock({ menuType = 'stock' }) {
       {menuType === 'alert' && (
         <div style={{ background: themeColors.boxBg, padding: '24px', borderRadius: '16px', border: `1px solid ${themeColors.border}`, boxShadow: isLight ? '0 4px 6px rgba(0,0,0,0.02)' : 'none', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ margin: 0, color: '#ff4d4f', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>🚨 매입 단가 인상 감지 (E상인 기준)</h3>
-            <span style={{ background: 'rgba(255,77,79,0.1)', color: '#ff4d4f', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>남은 알림 {visibleAlerts.length}건</span>
+            <h3 style={{ margin: 0, color: 'var(--danger)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>🚨</Emoji> 매입 단가 인상 감지 (E상인 기준)</h3>
+            <span style={{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>남은 알림 {visibleAlerts.length}건</span>
           </div>
           
           {paginatedAlerts.length > 0 ? (
@@ -278,12 +279,12 @@ function EsanginStock({ menuType = 'stock' }) {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}>
                       <span>최근 매입 단가:</span>
-                      <strong style={{ color: '#ff4d4f' }}>{alert.newPrice.toLocaleString()}원</strong>
+                      <strong style={{ color: 'var(--danger)' }}>{alert.newPrice.toLocaleString()}원</strong>
                     </div>
-                    
+
                     <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px dashed ${themeColors.border}`, fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: themeColors.textMuted }}>원가 인상폭:</span>
-                      <strong style={{ color: '#ff4d4f', fontSize: '15px' }}>▲ {alert.diff.toLocaleString()}원</strong>
+                      <strong style={{ color: 'var(--danger)', fontSize: '15px' }}>▲ {alert.diff.toLocaleString()}원</strong>
                     </div>
 
                     <button 
@@ -310,9 +311,9 @@ function EsanginStock({ menuType = 'stock' }) {
               )}
             </>
           ) : ( 
-            <div style={{ padding: '30px', textAlign: 'center', color: '#2fd37a', fontWeight: 'bold', fontSize: '14px', background: themeColors.inputBg, borderRadius: '12px' }}>
-              ✅ 모든 변동 내역을 확인하셨거나, 인상된 상품이 없습니다!
-            </div> 
+            <div style={{ padding: '30px', textAlign: 'center', color: 'var(--success)', fontWeight: 'bold', fontSize: '14px', background: themeColors.inputBg, borderRadius: '12px' }}>
+              <Emoji>✅</Emoji> 모든 변동 내역을 확인하셨거나, 인상된 상품이 없습니다!
+            </div>
           )}
         </div>
       )}
@@ -322,10 +323,10 @@ function EsanginStock({ menuType = 'stock' }) {
         <div style={{ background: themeColors.boxBg, border: `1px solid ${themeColors.border}`, borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
-              <h3 style={{ margin: 0, color: '#ff4d4f', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>🔥 악성재고 긴급 리스트</h3>
+              <h3 style={{ margin: 0, color: 'var(--danger)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>🔥</Emoji> 악성재고 긴급 리스트</h3>
               <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: themeColors.textMuted, wordBreak: 'keep-all', lineHeight: '1.4' }}>* 매입한지 3개월이 넘었는데 창고에 쌓여서 안 나가는 상품들입니다.</p>
             </div>
-            <span style={{ background: 'rgba(255,77,79,0.1)', color: '#ff4d4f', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>총 {badInventoryList.length}개 발견</span>
+            <span style={{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>총 {badInventoryList.length}개 발견</span>
           </div>
 
           {paginatedBadInv.length > 0 ? (
@@ -345,8 +346,8 @@ function EsanginStock({ menuType = 'stock' }) {
                         </div>
                       )}
                       <div style={{ fontSize: '12px', color: themeColors.textMuted, lineHeight: '1.6' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '13px' }}>📅</span> 마지막 매입: {item.lastInDate || '기록없음'}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '13px' }}>📅</span> 마지막 매출: {item.lastSalesDate || '기록없음'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '13px' }}><Emoji>📅</Emoji></span> 마지막 매입: {item.lastInDate || '기록없음'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '13px' }}><Emoji>📅</Emoji></span> 마지막 매출: {item.lastSalesDate || '기록없음'}</div>
                       </div>
                       <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px dashed ${themeColors.border}`, fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ color: themeColors.textMuted }}>묶인 원가:</span>
@@ -369,8 +370,8 @@ function EsanginStock({ menuType = 'stock' }) {
               )}
             </>
           ) : (
-            <div style={{ padding: '30px', textAlign: 'center', color: '#2fd37a', fontWeight: 'bold', fontSize: '14px', background: themeColors.inputBg, borderRadius: '12px' }}>
-              ✅ 3개월 이상 정체된 악성 재고가 없습니다!
+            <div style={{ padding: '30px', textAlign: 'center', color: 'var(--success)', fontWeight: 'bold', fontSize: '14px', background: themeColors.inputBg, borderRadius: '12px' }}>
+              <Emoji>✅</Emoji> 3개월 이상 정체된 악성 재고가 없습니다!
             </div>
           )}
         </div>
@@ -398,7 +399,7 @@ function EsanginStock({ menuType = 'stock' }) {
                     <td style={{ padding: '10px', color: themeColors.text, fontSize: '13px' }}>{Number(item.inPrice || 0).toLocaleString()}원</td>
                     <td style={{ padding: '10px', color: themeColors.textMuted, fontSize: '13px' }}>{item.spec || '-'}</td><td style={{ padding: '10px', color: themeColors.textMuted, fontSize: '13px' }}>{item.unit || '-'}</td>
                     <td style={{ padding: '10px', color: themeColors.text, fontSize: '13px' }}>{Number(item.boxQty || 0).toLocaleString()}</td>
-                    <td style={{ padding: '10px', color: item.stock <= reorderThreshold ? '#ff4d4f' : themeColors.text, fontWeight: item.stock <= reorderThreshold ? '900' : 'normal', fontSize: '13px' }}>{Number(item.stock || 0).toLocaleString()}</td>
+                    <td style={{ padding: '10px', color: item.stock <= reorderThreshold ? 'var(--danger)' : themeColors.text, fontWeight: item.stock <= reorderThreshold ? '900' : 'normal', fontSize: '13px' }}>{Number(item.stock || 0).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -424,7 +425,7 @@ function EsanginStock({ menuType = 'stock' }) {
           <div style={{ padding: '20px', background: isLight ? 'rgba(236, 72, 153, 0.05)' : 'rgba(236, 72, 153, 0.1)', border: `2px solid rgba(236, 72, 153, 0.4)`, borderRadius: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '15px' }}>
               <div>
-                <h3 style={{ margin: 0, color: '#ec4899', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>🧠 AI 품절 D-Day 예측</h3>
+                <h3 style={{ margin: 0, color: '#ec4899', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>🧠</Emoji> AI 품절 D-Day 예측</h3>
                 <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: themeColors.textMuted }}>최근 14일 판매 속도를 분석하여 품절 임박(D-14 이내) 상품을 찾아냅니다.</p>
               </div>
               
@@ -433,7 +434,7 @@ function EsanginStock({ menuType = 'stock' }) {
                 disabled={isFetchingDDay}
                 style={{ background: 'linear-gradient(135deg, #ec4899, #be185d)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: isFetchingDDay ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', opacity: isFetchingDDay ? 0.6 : 1, boxShadow: '0 2px 8px rgba(236,72,153,0.3)' }}
               >
-                {isFetchingDDay ? '⏳ AI 분석 중...' : '🎯 14일 내 품절 예상 상품 스캔'}
+                {isFetchingDDay ? <><Emoji>⏳</Emoji> AI 분석 중...</> : <><Emoji>🎯</Emoji> 14일 내 품절 예상 상품 스캔</>}
               </button>
             </div>
 
@@ -443,7 +444,7 @@ function EsanginStock({ menuType = 'stock' }) {
                     <div key={idx} style={{ padding: '14px', background: themeColors.inputBg, borderRadius: '12px', border: `1px dashed rgba(236, 72, 153, 0.5)`, boxShadow: isLight ? '0 2px 4px rgba(0,0,0,0.02)' : 'none', boxSizing: 'border-box', width: '100%' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <strong style={{ color: themeColors.text, fontSize: '15px', wordBreak: 'break-word', marginRight: '10px', lineHeight: '1.3' }}>{item.name}</strong>
-                        <span style={{ color: '#ec4899', fontSize: '16px', fontWeight: '900', whiteSpace: 'nowrap', flexShrink: 0 }}>D-{item.d_day} 🚨</span>
+                        <span style={{ color: '#ec4899', fontSize: '16px', fontWeight: '900', whiteSpace: 'nowrap', flexShrink: 0 }}>D-{item.d_day} <Emoji>🚨</Emoji></span>
                       </div>
                       {item.spec && (
                         <div style={{ marginBottom: '8px' }}>
@@ -468,7 +469,7 @@ function EsanginStock({ menuType = 'stock' }) {
           <div style={{ padding: '20px', background: isLight ? 'rgba(139, 92, 246, 0.05)' : 'rgba(139, 92, 246, 0.1)', border: `2px solid rgba(139, 92, 246, 0.4)`, borderRadius: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '15px' }}>
               <div>
-                <h3 style={{ margin: 0, color: '#8b5cf6', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>🌟 VVIP 품목 집중 감시망</h3>
+                <h3 style={{ margin: 0, color: '#8b5cf6', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>🌟</Emoji> VVIP 품목 집중 감시망</h3>
                 <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: themeColors.textMuted }}>대량 매입/주력 상품을 별도 수량으로 감시합니다.</p>
               </div>
               
@@ -478,7 +479,7 @@ function EsanginStock({ menuType = 'stock' }) {
                   disabled={isFetchingVvip}
                   style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: isFetchingVvip ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', opacity: isFetchingVvip ? 0.6 : 1 }}
                 >
-                  {isFetchingVvip ? '⏳ 추출 중...' : '👑 매출 Top 20 자동 추출'}
+                  {isFetchingVvip ? <><Emoji>⏳</Emoji> 추출 중...</> : <><Emoji>👑</Emoji> 매출 Top 20 자동 추출</>}
                 </button>
                 <span style={{ fontSize: '12px', fontWeight: 'bold', color: themeColors.textMuted, marginLeft: '8px' }}>대상:</span>
                 <input 
@@ -520,14 +521,14 @@ function EsanginStock({ menuType = 'stock' }) {
               </div>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#8b5cf6', fontWeight: 'bold', fontSize: '14px', background: themeColors.inputBg, borderRadius: '12px' }}>
-                ✅ 집중 관리 품목( {focusKeywords ? 'VVIP 20개 등' : '없음'} )의 재고가 모두 {focusThreshold}개 이상 유지 중입니다!
+                <Emoji>✅</Emoji> 집중 관리 품목( {focusKeywords ? 'VVIP 20개 등' : '없음'} )의 재고가 모두 {focusThreshold}개 이상 유지 중입니다!
               </div>
             )}
           </div>
 
           <div style={{ padding: '20px', background: themeColors.boxBg, border: `1px solid ${themeColors.border}`, borderRadius: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
-              <h3 style={{ margin: 0, color: '#ff9900', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>🛒 스마트 발주 (일반 품목)</h3>
+              <h3 style={{ margin: 0, color: 'var(--amber)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>🛒</Emoji> 스마트 발주 (일반 품목)</h3>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%' }}>
                 <input 
@@ -542,7 +543,7 @@ function EsanginStock({ menuType = 'stock' }) {
                   <input type="number" value={reorderThreshold} onChange={(e) => { setReorderThreshold(Number(e.target.value)); setReorderPage(1); }} style={{ width: '40px', padding: '4px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, background: themeColors.boxBg, color: themeColors.text, outline: 'none', textAlign: 'center', fontSize: '12px' }} />
                   <span style={{ fontSize: '12px', fontWeight: 'bold', color: themeColors.textMuted }}>개</span>
                 </div>
-                <button onClick={handleCopyReorderList} style={{ flexShrink: 0, background: '#ff9900', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(255, 153, 0, 0.3)', fontSize: '12px' }}>📋 통합 발주서 복사</button>
+                <button onClick={handleCopyReorderList} style={{ flexShrink: 0, background: 'var(--amber)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px color-mix(in srgb, var(--amber) 30%, transparent)', fontSize: '12px' }}><Emoji>📋</Emoji> 통합 발주서 복사</button>
               </div>
             </div>
 
@@ -584,7 +585,7 @@ function EsanginStock({ menuType = 'stock' }) {
 
           <div style={{ padding: '20px', background: themeColors.boxBg, border: `1px solid ${themeColors.border}`, borderRadius: '16px', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <h3 style={{ margin: 0, color: '#8c8c8c', fontSize: '16px', wordBreak: 'keep-all', lineHeight: '1.4' }}>⚠️ 단종 의심 (3개월 미거래)</h3>
+              <h3 style={{ margin: 0, color: '#8c8c8c', fontSize: '16px', wordBreak: 'keep-all', lineHeight: '1.4' }}><Emoji>⚠️</Emoji> 단종 의심 (3개월 미거래)</h3>
               <span style={{ background: themeColors.headerBg, padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', color: themeColors.textMuted, whiteSpace: 'nowrap' }}>총 {deadStockItems.length}개</span>
             </div>
             
@@ -603,8 +604,8 @@ function EsanginStock({ menuType = 'stock' }) {
                           </div>
                         )}
                         <div style={{ fontSize: '11px', color: themeColors.textMuted, lineHeight: '1.6' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '12px' }}>📅</span> 매입: {item.lastInDate || '기록없음'}</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '12px' }}>📅</span> 매출: {item.lastSalesDate || '기록없음'}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '12px' }}><Emoji>📅</Emoji></span> 매입: {item.lastInDate || '기록없음'}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ fontSize: '12px' }}><Emoji>📅</Emoji></span> 매출: {item.lastSalesDate || '기록없음'}</div>
                         </div>
                       </div>
                    ))}

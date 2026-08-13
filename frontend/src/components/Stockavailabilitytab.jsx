@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 const AVAILABILITY_CONFIG = {
   out: { label: '품절', accent: '#f87171' },
   not_found: { label: 'E상인 미등록', accent: '#facc15' },
   low: { label: '재고 부족', accent: '#fb923c' },
-  sufficient: { label: '충분', accent: '#4ade80' },
+  sufficient: { label: '충분', accent: 'var(--success)' },
 };
 
 function todayStr() {
@@ -77,8 +78,8 @@ export default function StockAvailabilityTab() {
             key={ch}
             style={{
               fontSize: '12px', padding: '4px 10px', borderRadius: '999px',
-              background: note.status === 'ok' ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
-              color: note.status === 'ok' ? '#4ade80' : '#f87171', fontWeight: 600,
+              background: note.status === 'ok' ? 'color-mix(in srgb, var(--success) 12%, transparent)' : 'rgba(248,113,113,0.12)',
+              color: note.status === 'ok' ? 'var(--success)' : '#f87171', fontWeight: 600,
             }}
           >
             {ch}: {note.status === 'ok' ? `주문 ${note.order_count}건` : (note.message || '오류')}
@@ -89,10 +90,10 @@ export default function StockAvailabilityTab() {
       {errorMsg && (
         <div style={{
           marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
-          background: 'rgba(255, 149, 0, 0.1)', border: '1px solid rgba(255, 149, 0, 0.35)',
-          color: '#ff9500', fontSize: '13px', fontWeight: 600,
+          background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
+          color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
-          ⚠️ {errorMsg}
+          <Emoji>⚠️</Emoji> {errorMsg}
         </div>
       )}
 
@@ -112,7 +113,7 @@ export default function StockAvailabilityTab() {
               style={{
                 padding: '8px 16px', borderRadius: '999px', fontSize: '13px', cursor: 'pointer',
                 border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: active ? 'rgba(47,107,255,0.15)' : 'transparent',
+                background: active ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'transparent',
                 color: active ? 'var(--text)' : 'var(--text-3)',
                 fontWeight: active ? 700 : 400,
               }}

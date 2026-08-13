@@ -8,6 +8,7 @@ import ReorderTabPage from './components/ReorderTabPage'; // 💡 재발주 알�
 import TodoListTab from './components/TodoListTab';
 import StockAvailabilityTab from './components/StockAvailabilityTab';
 import ProductMappingTab from './components/ProductMappingTab';
+import MemoTab from './components/MemoTab';
 import SalesDeclineTab from './components/SalesDeclineTab'; // 💡 판매 둔화 감지
 import SalesSurgeTab from './components/SalesSurgeTab'; // 💡 판매 급증 감지
 import NewPopularTab from './components/NewPopularTab'; // 💡 신규 인기상품
@@ -15,6 +16,7 @@ import StockReconcileTab from './components/StockReconcileTab'; // 💡 재고 �
 import StockAuditTab from './components/StockAuditTab'; // 💡 재고 실사 (수동)
 import { loadDismissed, signature } from './components/reorderAlertUtils';
 import { useTheme } from './ThemeContext.jsx';
+import { Emoji, Calculator as CalculatorIcon, Sun, Moon, Dot } from './components/Icons';
 
 // ====================================================
 // 🧮 찐 일반 계산기 (사이드바용 + 키보드 완벽 지원)
@@ -74,17 +76,17 @@ function SidebarCalculator() {
 
   return (
     <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: '100%', padding: '10px 14px', borderRadius: '10px',
-          background: isOpen ? '#1e5eff' : 'var(--local-box, rgba(255,255,255,0.05))', 
+          background: isOpen ? 'var(--accent)' : 'var(--local-box, rgba(255,255,255,0.05))',
           color: isOpen ? '#fff' : 'var(--text)', border: '1px solid var(--border)',
           fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
-          alignItems: 'center', transition: 'all 0.2s'
+          alignItems: 'center', gap: '8px', transition: 'all 0.2s'
         }}
       >
-        <span>🧮 퀵 계산기</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><CalculatorIcon size={16} /> 퀵 계산기</span>
         <span>{isOpen ? '▲' : '▼'}</span>
       </button>
 
@@ -114,9 +116,9 @@ function SidebarCalculator() {
                 <button 
                   key={b} 
                   onClick={() => handleClick(b)} 
-                  style={{ 
+                  style={{
                     padding: '10px 0', fontSize: '14px', fontWeight: 'bold', borderRadius: '6px', border: 'none', cursor: 'pointer',
-                    background: isOp ? '#1e5eff' : isClear ? '#ff4d4f' : '#333',
+                    background: isOp ? 'var(--accent)' : isClear ? 'var(--danger)' : '#334155',
                     color: '#fff', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', transition: 'transform 0.1s'
                   }}
                   onMouseDown={(e) => e.target.style.transform = 'scale(0.95)'}
@@ -190,13 +192,16 @@ function App() {
     { key: 'todo_list', label: '오늘 할 일', icon: '✅' },
     { key: 'stock_availability', label: '재고 가용성', icon: '📊' },
     { key: 'product_mapping', label: '상품명 매핑', icon: '🔗' },
+    { key: 'memo', label: '메모장', icon: '📝' },
   ];
 
   const getTopbarTitle = () => {
-    if (activeTab === 'esangin_stock') return '📦 E상인 - 재고 파악';
-    if (activeTab === 'esangin_deadstock') return '🔥 E상인 - 악성 재고';
-    return navItems.find((x) => x.key === activeTab)?.label || 'Dashboard';
+    if (activeTab === 'esangin_stock') return { icon: '📦', text: 'E상인 - 재고 파악' };
+    if (activeTab === 'esangin_deadstock') return { icon: '🔥', text: 'E상인 - 악성 재고' };
+    const found = navItems.find((x) => x.key === activeTab);
+    return { icon: found?.icon, text: found?.label || 'Dashboard' };
   };
+  const topbarTitle = getTopbarTitle();
 
   return (
     <>
@@ -236,9 +241,9 @@ function App() {
                   onClick={() => { setActiveTab(item.key); setIsEsanginOpen(false); }}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}
                 >
-                  <span>{item.icon} {item.label}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>{item.icon}</Emoji> {item.label}</span>
                   {item.key === 'reorder_alerts' && reorderUrgentCount > 0 && (
-                    <span className="nav-urgent-badge">🔴{reorderUrgentCount}</span>
+                    <span className="nav-urgent-badge"><Dot tone="red" size={8} />{reorderUrgentCount}</span>
                   )}
                 </button>
               ))}
@@ -250,15 +255,15 @@ function App() {
                   style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}
                 >
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span>🦅 E상인 통합 관리</span>
+                    <Emoji>🦅</Emoji><span>E상인 통합 관리</span>
                   </div>
                   <span>{isEsanginOpen ? '▲' : '▼'}</span>
                 </button>
 
                 {isEsanginOpen && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '28px', marginTop: '6px' }}>
-                    <button className={`navBtn ${activeTab === 'esangin_stock' ? 'navBtnActive' : ''}`} onClick={() => setActiveTab('esangin_stock')}>📦 재고 파악</button>
-                    <button className={`navBtn ${activeTab === 'esangin_deadstock' ? 'navBtnActive' : ''}`} onClick={() => setActiveTab('esangin_deadstock')}>🔥 악성 재고</button>
+                    <button className={`navBtn ${activeTab === 'esangin_stock' ? 'navBtnActive' : ''}`} onClick={() => setActiveTab('esangin_stock')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📦</Emoji> 재고 파악</button>
+                    <button className={`navBtn ${activeTab === 'esangin_deadstock' ? 'navBtnActive' : ''}`} onClick={() => setActiveTab('esangin_deadstock')} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>🔥</Emoji> 악성 재고</button>
                   </div>
                 )}
               </div>
@@ -271,20 +276,26 @@ function App() {
         <main className="main">
           <header className="topbar">
             <div>
-              <div className="topbarTitle">{getTopbarTitle()}</div>
+              <div className="topbarTitle" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Emoji>{topbarTitle.icon}</Emoji>{topbarTitle.text}
+              </div>
               <div className="topbarMeta">실시간 연동 · 자동 수집 엔진 가동 중</div>
             </div>
-            
+
             <div className="toolbar" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{
-                background: dbStatus === 'connected' ? 'rgba(47, 211, 122, 0.15)' : 'rgba(255, 77, 79, 0.15)', 
-                color: dbStatus === 'connected' ? '#2fd37a' : '#ff4d4f',
+                display: 'flex', alignItems: 'center', gap: '6px',
+                background: dbStatus === 'connected' ? 'color-mix(in srgb, var(--success) 15%, transparent)' : 'color-mix(in srgb, var(--danger) 15%, transparent)',
+                color: dbStatus === 'connected' ? 'var(--success)' : 'var(--danger)',
                 padding: '6px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold'
               }}>
-                {dbStatus === 'connected' ? '🟢 DB 연동됨' : '🔴 연결 끊김'}
+                <Dot tone={dbStatus === 'connected' ? 'green' : 'red'} size={8} />
+                {dbStatus === 'connected' ? 'DB 연동됨' : '연결 끊김'}
               </span>
 
-              <button className="btn" onClick={toggleTheme}>{theme === 'dark' ? '☀️' : '🌙'}</button>
+              <button className="btn" onClick={toggleTheme} aria-label="테마 전환" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
             </div>
           </header>
 
@@ -295,6 +306,7 @@ function App() {
             {activeTab === 'todo_list' && <TodoListTab />}
             {activeTab === 'stock_availability' && <StockAvailabilityTab />}
             {activeTab === 'product_mapping' && <ProductMappingTab />}
+            {activeTab === 'memo' && <MemoTab />}
             {activeTab === 'sales_decline' && <SalesDeclineTab />}
             {activeTab === 'sales_surge' && <SalesSurgeTab />}
             {activeTab === 'new_popular' && <NewPopularTab />}

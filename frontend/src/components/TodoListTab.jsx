@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -263,10 +264,10 @@ export default function TodoListTab() {
       {errorMsg && (
         <div style={{
           marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
-          background: 'rgba(255, 149, 0, 0.1)', border: '1px solid rgba(255, 149, 0, 0.35)',
-          color: '#ff9500', fontSize: '13px', fontWeight: 600,
+          background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
+          color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
-          ⚠️ {errorMsg}
+          <Emoji>⚠️</Emoji> {errorMsg}
         </div>
       )}
 
@@ -277,7 +278,7 @@ export default function TodoListTab() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
             <span style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text)' }}>
-              🔒 퇴근 전 체크리스트 {checklistDate ? `(${checklistDate})` : ''}
+              <Emoji>🔒</Emoji> 퇴근 전 체크리스트 {checklistDate ? `(${checklistDate})` : ''}
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
@@ -307,7 +308,7 @@ export default function TodoListTab() {
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}
                   title="이 항목 삭제 (매일 목록에서 제거됩니다)"
                 >
-                  ✕
+                  <Emoji>✕</Emoji>
                 </button>
               </div>
             ))}
@@ -381,7 +382,7 @@ export default function TodoListTab() {
                   onClick={() => setSelectedDate(dateStr)}
                   style={{
                     minHeight: '58px', borderRadius: '8px', padding: '6px 4px', cursor: 'pointer',
-                    background: isSelected ? 'rgba(47,107,255,0.18)' : 'var(--surface)',
+                    background: isSelected ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'var(--surface)',
                     border: isSelected ? '1px solid var(--accent)' : isToday ? '1px solid var(--border-2)' : '1px solid var(--border)',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
                   }}
@@ -392,7 +393,7 @@ export default function TodoListTab() {
                   {dayTodos.length > 0 && (
                     <span style={{
                       fontSize: '10px', padding: '1px 6px', borderRadius: '999px',
-                      background: doneCount === dayTodos.length ? 'rgba(47,211,122,0.18)' : 'rgba(255,77,79,0.18)',
+                      background: doneCount === dayTodos.length ? 'color-mix(in srgb, var(--success) 18%, transparent)' : 'color-mix(in srgb, var(--danger) 18%, transparent)',
                       color: doneCount === dayTodos.length ? 'var(--success)' : 'var(--danger)', fontWeight: 700,
                     }}>
                       {doneCount}/{dayTodos.length}
@@ -463,7 +464,7 @@ export default function TodoListTab() {
                     style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
                     title="삭제 (서버에서도 삭제됩니다)"
                   >
-                    ✕
+                    <Emoji>✕</Emoji>
                   </button>
                 </div>
               ))}

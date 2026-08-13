@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
 import Pagination from './Pagination';
+import { Emoji } from './Icons';
 
 const SEVERITY_CONFIG = {
   caution: { icon: '🟡', label: '주의', bg: 'rgba(250, 204, 21, 0.14)', border: '#eab308', text: '#b8860b' },
   warning: { icon: '🟠', label: '경고', bg: 'rgba(255, 122, 69, 0.12)', border: '#ff7a45', text: '#ff7a45' },
-  critical: { icon: '🔴', label: '심각', bg: 'rgba(255, 77, 79, 0.12)', border: '#ff4d4f', text: '#ff4d4f' },
+  critical: { icon: '🔴', label: '심각', bg: 'color-mix(in srgb, var(--danger) 12%, transparent)', border: 'var(--danger)', text: 'var(--danger)' },
 };
 
 const SORT_OPTIONS = [
@@ -90,7 +91,7 @@ export default function SalesDeclineTab() {
     return (
       <div className="reorder-alert-wrap">
         <div className="reorder-status-row reorder-status-empty">
-          <span>📉 {errorMsg}</span>
+          <span><Emoji>📉</Emoji> {errorMsg}</span>
         </div>
       </div>
     );
@@ -105,10 +106,10 @@ export default function SalesDeclineTab() {
     <div className="reorder-alert-wrap">
       <div className="reorder-status-row reorder-status-ok">
         <span>
-          📉 {lastMonth} → {thisMonth} 판매 비교
+          <Emoji>📉</Emoji> {lastMonth} → {thisMonth} 판매 비교
         </span>
         <button className="reorder-refresh-btn" onClick={fetchData} disabled={isLoading}>
-          {isLoading ? '🔄 확인 중...' : '🔄 새로고침'}
+          {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
         </button>
       </div>
 
@@ -142,7 +143,7 @@ export default function SalesDeclineTab() {
                 style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}
               >
                 <div className="reorder-alert-msg">
-                  <span className="reorder-alert-icon">{cfg.icon}</span>
+                  <span className="reorder-alert-icon"><Emoji>{cfg.icon}</Emoji></span>
                   <div className="reorder-alert-body">
                     <span className="reorder-alert-text" style={{ color: cfg.text }}>
                       [{item.product_name}]
@@ -163,7 +164,7 @@ export default function SalesDeclineTab() {
       ) : (
         !isLoading && (
           <div className="reorder-status-row reorder-status-empty">
-            <span>✨ 지난달 대비 30% 이상 판매가 줄어든 상품이 없습니다.</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>✨</Emoji> 지난달 대비 30% 이상 판매가 줄어든 상품이 없습니다.</span>
           </div>
         )
       )}
@@ -171,12 +172,12 @@ export default function SalesDeclineTab() {
       {substituted.length > 0 && (
         <div className="reorder-deadstock-wrap">
           <button className="reorder-deadstock-toggle" onClick={() => setSubstitutedOpen((v) => !v)}>
-            🔄 대체 공급처 전환 추정 — 확인 필요 ({substituted.length}개) {substitutedOpen ? '▲' : '▼'}
+            <Emoji>🔄</Emoji> 대체 공급처 전환 추정 — 확인 필요 ({substituted.length}개) {substitutedOpen ? '▲' : '▼'}
           </button>
           {substitutedOpen && (
             <div className="reorder-deadstock-list">
               <div className="substituted-hint">
-                ⚠️ 상품명 유사도로 자동 추정한 결과입니다. 실제로 같은 상품인지는 사장님이 직접 확인해주세요.
+                <Emoji>⚠️</Emoji> 상품명 유사도로 자동 추정한 결과입니다. 실제로 같은 상품인지는 사장님이 직접 확인해주세요.
               </div>
               {substituted.map((s, i) => (
                 <div key={i} className="reorder-deadstock-item">

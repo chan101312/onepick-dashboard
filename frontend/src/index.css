@@ -22,10 +22,13 @@ html, body {
   --text-2: rgba(255, 255, 255, 0.78);
   --text-3: rgba(255, 255, 255, 0.60);
 
-  --accent: #2f6bff;
-  --accent-2: #1e5eff;
-  --danger: #ff4d4f;
-  --success: #2fd37a;
+  /* B2B 식자재 유통 대시보드 디자인 시스템: Data-Dense Dashboard (블루 데이터 + 앰버 강조) */
+  --primary: #3b82f6;
+  --accent: #3b82f6;
+  --accent-2: #2563eb;
+  --amber: #f59e0b;
+  --danger: #f87171;
+  --success: #4ade80;
 
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   --radius-lg: 14px;
@@ -33,25 +36,27 @@ html, body {
   --radius-sm: 8px;
 }
 
-/* 💡 라이트모드 변수 */
+/* 라이트모드 변수 */
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: #dfe4f0;
-  --panel: #e8eaef;
-  --surface: #f0f1f3;
-  --surface-2: #e8eaef;
-  --border: #9ca3af;
-  --border-2: #a0a9bf;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --surface: #f1f5f9;
+  --surface-2: #e2e8f0;
+  --border: #dbeafe;
+  --border-2: #bfdbfe;
 
-  --text: #1a1a1a;
-  --text-2: #374151;
-  --text-3: #6b7280;
+  --text: #0f172a;
+  --text-2: #334155;
+  --text-3: #64748b;
 
-  --accent: #2f6bff;
-  --accent-2: #1e5eff;
-  --danger: #ff4d4f;
-  --success: #2fd37a;
+  --primary: #1e40af;
+  --accent: #1e40af;
+  --accent-2: #3b82f6;
+  --amber: #d97706;
+  --danger: #dc2626;
+  --success: #16a34a;
 
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
   --radius-lg: 14px;
@@ -62,11 +67,12 @@ html, body {
 body {
   margin: 0;
   padding: 0;
-  background: radial-gradient(1200px 600px at 50% -10%, rgba(47, 107, 255, 0.12), transparent 50%),
+  background: radial-gradient(1200px 600px at 50% -10%, rgba(59, 130, 246, 0.12), transparent 50%),
     var(--bg);
-  /* 💡 위아래 정중앙으로 몰리는 악성 설정 해제! 이제 무조건 맨 위(상단)에 딱 붙습니다. */
-  display: block !important; 
+  /* 위아래 정중앙으로 몰리는 기본 정렬 해제 — 항상 상단에 고정 */
+  display: block !important;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 #root {

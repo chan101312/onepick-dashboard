@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../apiBase';
 import { useTheme } from '../ThemeContext';
+import { Emoji, EmojiText } from './Icons';
 
 export default function MarginTab() {
   const [file, setFile] = useState(null);
@@ -546,24 +547,24 @@ export default function MarginTab() {
   };
 
   const getPlatformColor = (colName) => {
-    if (colName.includes('네이버')) return isLight ? 'rgba(47, 211, 122, 0.15)' : 'rgba(47, 211, 122, 0.08)';
-    if (colName.includes('쿠팡')) return isLight ? 'rgba(255, 77, 79, 0.15)' : 'rgba(255, 77, 79, 0.08)';
-    if (colName.includes('배민')) return isLight ? 'rgba(47, 107, 255, 0.15)' : 'rgba(47, 107, 255, 0.08)';
-    // 🚫 롯데온 판매 중단: if (colName.includes('롯데온')) return isLight ? 'rgba(255, 153, 0, 0.15)' : 'rgba(255, 153, 0, 0.08)';
-    if (colName.includes('식봄')) return isLight ? 'rgba(47, 211, 122, 0.1)' : 'rgba(47, 211, 122, 0.05)';
+    if (colName.includes('네이버')) return 'color-mix(in srgb, var(--success) 12%, transparent)';
+    if (colName.includes('쿠팡')) return 'color-mix(in srgb, var(--danger) 12%, transparent)';
+    if (colName.includes('배민')) return 'color-mix(in srgb, var(--accent) 12%, transparent)';
+    // 🚫 롯데온 판매 중단: if (colName.includes('롯데온')) return 'color-mix(in srgb, var(--amber) 12%, transparent)';
+    if (colName.includes('식봄')) return 'color-mix(in srgb, var(--success) 8%, transparent)';
     return 'transparent';
   };
 
   return (
     <div className="responsive-container" translate="no" style={themeVars}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <h2 style={{ textAlign: 'left', margin: 0 }}>📊 마진 산출 장부</h2>
+        <h2 style={{ textAlign: 'left', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📊</Emoji> 마진 산출 장부</h2>
       </div>
       
       {visibleAlerts.length > 0 && (
         <div style={{ background: 'var(--local-box)', padding: '20px', borderRadius: '16px', border: `2px solid var(--local-border)`, marginBottom: '20px', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ margin: 0, color: 'var(--local-text)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4' }}>📢 [알림] E상인 매입 단가 변동 감지!</h3>
+            <h3 style={{ margin: 0, color: 'var(--local-text)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4', display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📢</Emoji> [알림] E상인 매입 단가 변동 감지!</h3>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{ background: 'var(--local-input-bg)', border: '1px solid var(--local-border)', color: 'var(--local-text)', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                   미확인 알림 {visibleAlerts.length}건
@@ -581,7 +582,7 @@ export default function MarginTab() {
                   onMouseOver={(e) => { e.target.style.transform = 'scale(1.05)'; e.target.style.background = isLight ? '#404040' : '#ffffff'; }}
                   onMouseOut={(e) => { e.target.style.transform = 'scale(1)'; e.target.style.background = isLight ? '#1a1a1a' : '#f0f0f0'; }}
                 >
-                  전체 확인 완료 🧹
+                  전체 확인 완료 <Emoji>🧹</Emoji>
                 </button>
               </div>
             </div>
@@ -593,7 +594,7 @@ export default function MarginTab() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px', boxSizing: 'border-box', width: '100%' }}>
             {visibleAlerts.map((alert, idx) => {
               const isUp = alert.diff > 0;
-              const colorCode = isUp ? '#ff4d4f' : '#2f6bff';
+              const colorCode = isUp ? 'var(--danger)' : 'var(--accent)';
               const sign = isUp ? '▲' : '▼';
               const diffAbs = Math.abs(alert.diff);
 
@@ -618,7 +619,7 @@ export default function MarginTab() {
                   </div>
                   
                   <div style={{ marginTop: 'auto' }}>
-                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px dashed ${colorCode}40`, fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px dashed color-mix(in srgb, ${colorCode} 40%, transparent)`, fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: 'var(--local-text-muted)' }}>{isUp ? '원가 인상폭:' : '원가 인하폭:'}</span>
                       <strong style={{ color: colorCode, fontSize: '15px' }}>{sign} {diffAbs.toLocaleString()}원</strong>
                     </div>
@@ -645,11 +646,11 @@ export default function MarginTab() {
 
       <div style={{ marginBottom: '14px', padding: '14px', border: `1px dashed var(--local-border)`, borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', background: 'var(--local-box)' }}>
         <div>
-          <strong>📥 새 단가표 업로드: </strong>
+          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>📥</Emoji> 새 단가표 업로드: </strong>
           <input type="file" accept=".csv, .xlsx" onChange={handleFileChange} style={{ maxWidth: '100%' }} />
         </div>
         {currentFileName && (
-          <div style={{ backgroundColor: 'rgba(47,211,122,0.12)', padding: '6px 12px', borderRadius: '999px', color: 'var(--local-text)', border: `1px solid var(--local-border)`, fontWeight: 700, fontSize: '12px', whiteSpace: 'nowrap' }}>📄 파일: {currentFileName}</div>
+          <div style={{ backgroundColor: 'color-mix(in srgb, var(--success) 12%, transparent)', padding: '6px 12px', borderRadius: '999px', color: 'var(--local-text)', border: `1px solid var(--local-border)`, fontWeight: 700, fontSize: '12px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>📄</Emoji> 파일: {currentFileName}</div>
         )}
       </div>
 
@@ -658,13 +659,13 @@ export default function MarginTab() {
           '🟢 네이버': 'naver', '🚀 쿠팡': 'coupang', '🛵 배민': 'baemin', /* 🚫 롯데온 판매 중단: '🔴 롯데온': 'lotteon', */ '🥬 식봄': 'sikbom'
         }).map(([label, key]) => (
           <div key={key} style={{ flex: '1 1 120px' }}>
-            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}>{label} (%)</label>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}><EmojiText text={label} /> (%)</label>
             <input type="number" step="0.1" value={fees[key]} onChange={(e) => handleFeeChange(key, parseFloat(e.target.value))} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', boxSizing: 'border-box' }} />
           </div>
         ))}
         <div style={{ flex: '1 1 120px' }}>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px', color: '#ff4d4f' }}>⚠️ 경고 기준 마진율 (%)</label>
-          <input type="number" step="0.1" value={marginThreshold} onChange={(e) => handleThresholdChange(e.target.value)} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: '1px solid rgba(255,77,79,0.5)', borderRadius: '6px', boxSizing: 'border-box' }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px', color: 'var(--danger)' }}><Emoji>⚠️</Emoji> 경고 기준 마진율 (%)</label>
+          <input type="number" step="0.1" value={marginThreshold} onChange={(e) => handleThresholdChange(e.target.value)} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)', borderRadius: '6px', boxSizing: 'border-box' }} />
         </div>
       </div>
       <p style={{ color: 'var(--local-text-muted)', margin: '0 0 14px 0', fontSize: '0.85rem', wordBreak: 'keep-all' }}>
@@ -676,13 +677,13 @@ export default function MarginTab() {
       </div>
 
       <div style={{ position: 'relative' }}>
-        {isCalculating && safeFullData.length > 0 && <div style={{ position: 'absolute', top: '20%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'rgba(0,0,0,0.8)', color: 'white', padding: '10px 20px', borderRadius: '20px', fontWeight: 'bold', zIndex: 10, whiteSpace: 'nowrap' }}>⚡ 서버 통신 중...</div>}
+        {isCalculating && safeFullData.length > 0 && <div style={{ position: 'absolute', top: '20%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: 'rgba(0,0,0,0.8)', color: 'white', padding: '10px 20px', borderRadius: '20px', fontWeight: 'bold', zIndex: 10, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>⚡</Emoji> 서버 통신 중...</div>}
         
         {safeFullData.length > 0 ? (
           <div style={{ opacity: isCalculating ? 0.4 : 1, transition: 'opacity 0.2s' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', gap: '10px', flexWrap: 'wrap' }}>
-              <h3 style={{ color: 'var(--local-text)', margin: 0, fontSize: '14px', fontWeight: 750 }}>💰 1. 원가 및 상세 내역</h3>
+              <h3 style={{ color: 'var(--local-text)', margin: 0, fontSize: '14px', fontWeight: 750, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>💰</Emoji> 1. 원가 및 상세 내역</h3>
               
               <div className='responsive-btn-container' style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <select value={sortType} onChange={(e) => { setSortType(e.target.value); setCurrentPage(1); }} style={{ padding: '9px 12px', borderRadius: '10px', border: `1px solid var(--local-border)`, background: 'var(--local-input-bg)', color: 'var(--local-text)', outline: 'none', cursor: 'pointer', fontWeight: 700 }}>
@@ -691,9 +692,9 @@ export default function MarginTab() {
                   <option value="nameDesc" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>🔡 이름 역순</option>
                   <option value="marginDesc" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>💸 마진 높은 순</option>
                 </select>
-                <button className="responsive-btn" onClick={handleAddRow} style={{ background: 'var(--local-input-bg)', color: 'var(--local-text)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: `1px solid var(--local-border)`, cursor: 'pointer' }}>➕ 상품 추가</button>
-                <button className="responsive-btn" onClick={handleRefreshData} style={{ background: 'rgba(255,159,10,0.1)', color: isLight ? '#d97706' : 'var(--text)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid rgba(255,159,10,0.35)', cursor: 'pointer' }}>🔄 데이터 최신화</button>
-                <button className="responsive-btn" onClick={() => updateMarginWithData(safeFullData, fees, true)} style={{ background: 'linear-gradient(180deg, rgba(47,107,255,0.95), rgba(30,94,255,0.9))', color: '#fff', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid rgba(47,107,255,0.35)', cursor: 'pointer' }}>💾 확인 및 저장</button>
+                <button className="responsive-btn" onClick={handleAddRow} style={{ background: 'var(--local-input-bg)', color: 'var(--local-text)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: `1px solid var(--local-border)`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>➕</Emoji> 상품 추가</button>
+                <button className="responsive-btn" onClick={handleRefreshData} style={{ background: 'color-mix(in srgb, var(--amber) 10%, transparent)', color: 'var(--amber)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>🔄</Emoji> 데이터 최신화</button>
+                <button className="responsive-btn" onClick={() => updateMarginWithData(safeFullData, fees, true)} style={{ background: 'linear-gradient(180deg, var(--accent), var(--accent-2))', color: '#fff', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>💾</Emoji> 확인 및 저장</button>
               </div>
             </div>
 
@@ -720,7 +721,7 @@ export default function MarginTab() {
                       : '-';
                     return (
                       <tr key={globalIndex} style={{ borderBottom: `1px solid var(--local-border)`, backgroundColor: marginInfo.isLow ? (isLight ? 'rgba(255,77,79,0.05)' : 'rgba(255,77,79,0.04)') : 'transparent' }}>
-                        <td style={{ padding: '6px', verticalAlign: 'top' }}><button onClick={() => handleDeleteRow(globalIndex)} style={{ backgroundColor: 'transparent', color: 'rgba(255,77,79,0.95)', border: '1px solid rgba(255,77,79,0.35)', borderRadius: '10px', cursor: 'pointer', padding: '8px 10px', fontSize: '12px' }}>🗑️ 삭제</button></td>
+                        <td style={{ padding: '6px', verticalAlign: 'top' }}><button onClick={() => handleDeleteRow(globalIndex)} style={{ backgroundColor: 'transparent', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)', borderRadius: '10px', cursor: 'pointer', padding: '8px 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🗑️</Emoji> 삭제</button></td>
                         <td style={{ padding: '6px', verticalAlign: 'top' }}>
                           <select value={row['과세구분'] || '과세'} onChange={(e) => handleTaxTypeChange(globalIndex, e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', border: `1px solid var(--local-border)`, borderRadius: '10px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', fontWeight: 700, cursor: 'pointer' }}>
                             <option value="과세" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>과세</option>
@@ -758,7 +759,7 @@ export default function MarginTab() {
               <button className="margin-pagination-btn" onClick={() => setCurrentPage(endPage + 1)} disabled={endPage === totalPages} style={{ flexShrink: 0, whiteSpace: 'nowrap', background: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', padding: isMobile ? '6px 10px' : '8px 14px', fontSize: isMobile ? '12px' : '14px', cursor: 'pointer', opacity: endPage === totalPages ? 0.5 : 1 }}>다음 ▶</button>
             </div>
 
-            <h3 style={{ marginTop: '28px', color: 'var(--local-text)', borderTop: `1px solid var(--local-border)`, paddingTop: '14px', fontSize: '14px', fontWeight: 750 }}>🛍️ 2. 플랫폼별 최종 판매가</h3>
+            <h3 style={{ marginTop: '28px', color: 'var(--local-text)', borderTop: `1px solid var(--local-border)`, paddingTop: '14px', fontSize: '14px', fontWeight: 750, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>🛍️</Emoji> 2. 플랫폼별 최종 판매가</h3>
             <div className="responsive-overflow" style={{ overflowX: 'auto', paddingBottom: '10px', minHeight: '480px', background: 'var(--local-box)', borderRadius: '12px' }}>
               <table border="0" style={{ tableLayout: 'fixed', width: '100%', minWidth: '700px', borderCollapse: 'collapse', textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <thead style={{ textAlign: 'center' }}>
@@ -779,14 +780,14 @@ export default function MarginTab() {
                         const rate = !isNameCol ? marginInfo.rates[platformLabel] : null;
                         const isLowCell = rate !== null && rate !== undefined && rate < marginThreshold;
                         return (
-                          <td key={i} style={{ padding: '12px', color: isLight ? '#111827' : 'white', backgroundColor: isNameCol ? 'transparent' : getPlatformColor(col), textAlign: isNameCol ? 'left' : 'right', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' }}>
+                          <td key={i} style={{ padding: '12px', color: 'var(--local-text)', backgroundColor: isNameCol ? 'transparent' : getPlatformColor(col), textAlign: isNameCol ? 'left' : 'right', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' }}>
                             {isNameCol ? (
                               row[col] || ''
                             ) : (
                               <>
                                 {typeof row[col] === 'number' ? row[col].toLocaleString() + '원' : (row[col] || "0원")}
                                 {rate !== null && rate !== undefined && (
-                                  <span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 'bold', color: isLowCell ? '#ff4d4f' : (isLight ? '#16a34a' : '#4ade80') }}>
+                                  <span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 'bold', color: isLowCell ? 'var(--danger)' : 'var(--success)' }}>
                                     ({rate.toFixed(1)}%)
                                   </span>
                                 )}

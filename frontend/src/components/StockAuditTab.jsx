@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 export default function StockAuditTab() {
   const [query, setQuery] = useState('');
@@ -83,7 +84,7 @@ export default function StockAuditTab() {
   return (
     <div className="reorder-alert-wrap">
       <div className="reorder-status-row reorder-status-ok">
-        <span>📋 재고 실사 — 상품 검색 후 실물 수량 입력 (배민상회 등 API 미제공 채널 대상)</span>
+        <span><Emoji>📋</Emoji> 재고 실사 — 상품 검색 후 실물 수량 입력 (배민상회 등 API 미제공 채널 대상)</span>
       </div>
 
       <div className="reorder-settings-panel" style={{ marginTop: 0 }}>
@@ -131,15 +132,15 @@ export default function StockAuditTab() {
         {lastResult && (
           <div className={`audit-result-banner ${lastResult.mismatch ? 'audit-result-mismatch' : 'audit-result-match'}`}>
             {lastResult.mismatch
-              ? `⚠️ 불일치: [${lastResult.product_name}] 실물 ${lastResult.physical_qty}개 vs 시스템 ${lastResult.system_qty}개 (차이 ${lastResult.diff > 0 ? '+' : ''}${lastResult.diff})`
-              : `✅ 일치: [${lastResult.product_name}] ${lastResult.physical_qty}개`}
+              ? <><Emoji>⚠️</Emoji> 불일치: [{lastResult.product_name}] 실물 {lastResult.physical_qty}개 vs 시스템 {lastResult.system_qty}개 (차이 {lastResult.diff > 0 ? '+' : ''}{lastResult.diff})</>
+              : <><Emoji>✅</Emoji> 일치: [{lastResult.product_name}] {lastResult.physical_qty}개</>}
           </div>
         )}
       </div>
 
       <div className="reorder-settings-section">
         <div className="reorder-deadstock-toggle" style={{ cursor: 'default' }}>
-          🗂️ 실사 이력 ({history.length}건)
+          <Emoji>🗂️</Emoji> 실사 이력 ({history.length}건)
         </div>
         <div className="reorder-deadstock-list" style={{ marginTop: '10px' }}>
           {history.length > 0 ? (

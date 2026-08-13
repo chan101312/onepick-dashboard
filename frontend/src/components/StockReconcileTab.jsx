@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 const CHANNEL_BADGE = {
   쿠팡: { bg: 'rgba(255, 61, 46, 0.12)', border: '#ff3d2e', text: '#ff3d2e' },
@@ -191,7 +192,7 @@ export default function StockReconcileTab() {
     <div className="reorder-alert-wrap">
       {/* ===== 기능 A: 누락 의심 주문 ===== */}
       <div className="reorder-status-row reorder-status-ok">
-        <span>🧾 온라인 주문 vs E상인 판매전표 대조</span>
+        <span><Emoji>🧾</Emoji> 온라인 주문 vs E상인 판매전표 대조</span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="date"
@@ -214,13 +215,13 @@ export default function StockReconcileTab() {
             onClick={() => fetchOrderReconcile(startDate, endDate)}
             disabled={isLoadingOrders}
           >
-            {isLoadingOrders ? '🔄 확인 중...' : '🔄 조회'}
+            {isLoadingOrders ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 조회</>}
           </button>
         </div>
       </div>
 
       {orderErrorMsg && (
-        <div className="reorder-status-row reorder-status-empty"><span>⚠️ {orderErrorMsg}</span></div>
+        <div className="reorder-status-row reorder-status-empty"><span><Emoji>⚠️</Emoji> {orderErrorMsg}</span></div>
       )}
 
       {Object.keys(channelNotes).length > 0 && (
@@ -312,7 +313,7 @@ export default function StockReconcileTab() {
       ) : (
         !isLoadingOrders && !orderErrorMsg && (
           <div className="reorder-status-row reorder-status-empty">
-            <span>✨ 미입력 의심 주문이 없습니다.</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>✨</Emoji> 미입력 의심 주문이 없습니다.</span>
           </div>
         )
       )}
@@ -320,9 +321,9 @@ export default function StockReconcileTab() {
       {/* ===== 기능 B: 채널 동기화 미리보기 ===== */}
       <div className="reorder-settings-section">
         <div className="reorder-status-row reorder-status-ok" style={{ marginBottom: '8px' }}>
-          <span>🔄 채널 동기화 미리보기 (dry-run — 실제 채널엔 반영되지 않음)</span>
+          <span><Emoji>🔄</Emoji> 채널 동기화 미리보기 (dry-run — 실제 채널엔 반영되지 않음)</span>
           <button className="reorder-refresh-btn" onClick={fetchSyncPreview} disabled={isLoadingSync}>
-            {isLoadingSync ? '🔄 확인 중...' : '🔄 새로고침'}
+            {isLoadingSync ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
           </button>
         </div>
 
@@ -332,7 +333,7 @@ export default function StockReconcileTab() {
         </div>
 
         {syncErrorMsg && (
-          <div className="reorder-status-row reorder-status-empty"><span>⚠️ {syncErrorMsg}</span></div>
+          <div className="reorder-status-row reorder-status-empty"><span><Emoji>⚠️</Emoji> {syncErrorMsg}</span></div>
         )}
 
         <div className="reorder-deadstock-list" style={{ marginTop: '10px' }}>

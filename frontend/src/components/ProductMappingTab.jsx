@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji } from './Icons';
 
 export default function ProductMappingTab() {
   const [mapping, setMapping] = useState([]);
@@ -111,7 +112,7 @@ export default function ProductMappingTab() {
         background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)',
         padding: '16px', marginBottom: '20px',
       }}>
-        <div style={{ fontWeight: 700, marginBottom: '10px', color: 'var(--text)' }}>➕ 새 매핑 등록</div>
+        <div style={{ fontWeight: 700, marginBottom: '10px', color: 'var(--text)' }}><Emoji>➕</Emoji> 새 매핑 등록</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
           <input
             type="text"
@@ -140,10 +141,10 @@ export default function ProductMappingTab() {
       {errorMsg && (
         <div style={{
           marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
-          background: 'rgba(255, 149, 0, 0.1)', border: '1px solid rgba(255, 149, 0, 0.35)',
-          color: '#ff9500', fontSize: '13px', fontWeight: 600,
+          background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
+          color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
-          ⚠️ {errorMsg}
+          <Emoji>⚠️</Emoji> {errorMsg}
         </div>
       )}
 
@@ -206,7 +207,7 @@ export default function ProductMappingTab() {
                       style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
                       title="이 별칭만 삭제"
                     >
-                      ✕
+                      <Emoji>✕</Emoji>
                     </button>
                   </div>
                 ))}

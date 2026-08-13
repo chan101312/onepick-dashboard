@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
 import { DISMISS_KEY, loadDismissed, signature } from './reorderAlertUtils';
 import Pagination from './Pagination';
+import { Emoji, EmojiText } from './Icons';
 
 const URGENCY_CONFIG = {
   urgent: { icon: '●', label: '즉시 발주 필요', accent: '#f87171', text: '#e5e7eb' },
@@ -180,7 +181,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     return (
       <div className="reorder-alert-wrap">
         <div className="reorder-status-row reorder-status-empty">
-          <span>⚠️ {errorMsg}</span>
+          <span><Emoji>⚠️</Emoji> {errorMsg}</span>
         </div>
       </div>
     );
@@ -192,9 +193,9 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const statusText = (
     <>
       {isStale
-        ? `⚠️ 데이터가 오래되었을 수 있어요. 새로고침으로 갱신하세요. (마지막 업데이트: ${lastUpdated})`
-        : `✅ E상인 연동 중 · 마지막 업데이트: ${lastUpdated}`}
-      {dataSource === 'fallback' && ' · ⚠️ 실시간 DB 연결 실패, 추정치로 표시 중'}
+        ? <><Emoji>⚠️</Emoji> 데이터가 오래되었을 수 있어요. 새로고침으로 갱신하세요. (마지막 업데이트: {lastUpdated})</>
+        : <><Emoji>✅</Emoji> E상인 연동 중 · 마지막 업데이트: {lastUpdated}</>}
+      {dataSource === 'fallback' && <> · <Emoji>⚠️</Emoji> 실시간 DB 연결 실패, 추정치로 표시 중</>}
     </>
   );
 
@@ -204,7 +205,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
           <span>{statusText}</span>
           <button className="reorder-refresh-btn" onClick={handleRefreshClick} disabled={isLoading}>
-            {isLoading ? '🔄 확인 중...' : '🔄 새로고침'}
+            {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
           </button>
         </div>
       </div>
@@ -311,7 +312,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
         <span>{statusText}</span>
         <button className="reorder-refresh-btn" onClick={handleRefreshClick} disabled={isLoading}>
-          {isLoading ? '🔄 확인 중...' : '🔄 새로고침'}
+          {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
         </button>
       </div>
 
@@ -346,7 +347,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                 fontWeight: active ? 700 : 400,
               }}
             >
-              {t.label} ({count})
+              <EmojiText text={t.label} /> ({count})
             </button>
           );
         })}
@@ -362,7 +363,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
             style={{
               padding: '6px 14px', borderRadius: '999px', fontSize: '12px', cursor: 'pointer',
               border: vendorMode === 'all' ? '1px solid var(--accent)' : '1px solid var(--border)',
-              background: vendorMode === 'all' ? 'rgba(47,107,255,0.15)' : 'transparent',
+              background: vendorMode === 'all' ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'transparent',
               color: vendorMode === 'all' ? 'var(--text)' : 'var(--text-3)',
               fontWeight: vendorMode === 'all' ? 700 : 400,
             }}
@@ -378,7 +379,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                 style={{
                   padding: '6px 14px', borderRadius: '999px', fontSize: '12px', cursor: 'pointer',
                   border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: active ? 'rgba(47,107,255,0.15)' : 'transparent',
+                  background: active ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'transparent',
                   color: active ? 'var(--text)' : 'var(--text-3)',
                   fontWeight: active ? 700 : 400,
                 }}
@@ -407,15 +408,15 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
-          padding: '10px 14px', margin: '8px 0', background: 'rgba(59,130,246,0.08)',
-          border: '1px solid rgba(59,130,246,0.35)', borderRadius: '8px',
+          padding: '10px 14px', margin: '8px 0', background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)', borderRadius: '8px',
         }}
       >
         <button
           onClick={allShownSelected ? deselectAllShown : selectAllShown}
           style={{
-            padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(59,130,246,0.5)',
-            background: allShownSelected ? 'rgba(59,130,246,0.25)' : 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px',
+            padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
+            background: allShownSelected ? 'color-mix(in srgb, var(--accent) 25%, transparent)' : 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px',
           }}
         >
           {allShownSelected ? '현재 페이지 선택해제' : '현재 페이지 전체선택'}
@@ -425,13 +426,13 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
           <>
             <button
               onClick={() => setSelectedOpen((v) => !v)}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(59,130,246,0.5)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
+              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
             >
               선택 목록 {selectedOpen ? '접기' : '펼치기'}
             </button>
             <button
               onClick={copySelectedList}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(59,130,246,0.5)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
+              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
             >
               목록 복사
             </button>
@@ -440,7 +441,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
               style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(250,204,21,0.5)', background: 'transparent', color: '#facc15', cursor: 'pointer', fontSize: '13px' }}
               title="재고를 미리 안 쌓아두고 주문 시 매입하는 상품 - 등록하면 재발주 알림에서 제외됩니다"
             >
-              🍢 당일매입형으로 등록
+              <Emoji>🍢</Emoji> 당일매입형으로 등록
             </button>
             <button
               onClick={clearSelection}
@@ -448,7 +449,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
             >
               전체 해제
             </button>
-            {copyMsg && <span style={{ color: '#4ade80', fontSize: '13px' }}>{copyMsg}</span>}
+            {copyMsg && <span style={{ color: 'var(--success)', fontSize: '13px' }}>{copyMsg}</span>}
           </>
         )}
       </div>
@@ -473,7 +474,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                   style={{ background: 'transparent', border: 'none', color: cfg.text, cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
                   title="선택 해제"
                 >
-                  ✕
+                  <Emoji>✕</Emoji>
                 </button>
               </div>
             );
@@ -575,7 +576,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       {deadstocks.length > 0 && (
         <div className="reorder-deadstock-wrap">
           <button className="reorder-deadstock-toggle" onClick={() => setDeadstockOpen((v) => !v)}>
-            📦 데드스톡 주의 ({deadstocks.length}개) {deadstockOpen ? '▲' : '▼'}
+            <Emoji>📦</Emoji> 데드스톡 주의 ({deadstocks.length}개) {deadstockOpen ? '▲' : '▼'}
           </button>
           {deadstockOpen && (
             <>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE } from '../apiBase';
+import { Emoji, EmojiText } from './Icons';
 
 // 💡 마진 산출 장부(MarginTab.jsx)와 동일한 계산식을 그대로 복제한 것입니다.
 // MarginTab.jsx는 건드리지 않기 위해 일부러 별도 함수로 둡니다 (원본 로직 변경 없음).
@@ -60,8 +61,6 @@ export default function TopRankingTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [isLight, setIsLight] = useState(() => document.documentElement.getAttribute('data-theme') === 'light');
-
   const [marginRows, setMarginRows] = useState([]);
   const [marginThreshold] = useState(() => {
     const saved = localStorage.getItem('marginThreshold');
@@ -80,12 +79,6 @@ export default function TopRankingTab() {
     });
     return map;
   }, [marginRows]);
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => setIsLight(document.documentElement.getAttribute('data-theme') === 'light'));
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/margin/data`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
@@ -116,19 +109,19 @@ export default function TopRankingTab() {
   useEffect(() => { fetchTop5(); }, []);
 
   const themeVars = {
-    bg: isLight ? '#ffffff' : 'rgba(255,255,255,0.02)',
-    text: isLight ? '#111827' : '#ffffff',
-    textMuted: isLight ? '#6b7280' : '#9ca3af',
-    border: isLight ? '#e5e7eb' : 'rgba(255,255,255,0.1)',
-    cardBg: isLight ? '#f9fafb' : 'rgba(0,0,0,0.2)',
+    bg: 'var(--panel)',
+    text: 'var(--text)',
+    textMuted: 'var(--text-3)',
+    border: 'var(--border)',
+    cardBg: 'var(--surface)',
   };
 
-  if (loading) return <div style={{ padding: '40px', color: themeVars.text, fontWeight: 'bold' }}>E상인 DB에서 실시간 매출 데이터를 긁어와 분석 중입니다... 🚀</div>;
+  if (loading) return <div style={{ padding: '40px', color: themeVars.text, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>E상인 DB에서 실시간 매출 데이터를 긁어와 분석 중입니다... <Emoji>🚀</Emoji></div>;
   if (error) return (
-    <div style={{ color: '#ff4d4f', padding: '20px', fontWeight: 'bold' }}>
-      ⚠️ {error} <br/>
-      <button onClick={fetchTop5} style={{ marginTop: '15px', padding: '10px 20px', cursor: 'pointer', background: '#ff4d4f', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
-        🔄 다시 시도
+    <div style={{ color: 'var(--danger)', padding: '20px', fontWeight: 'bold' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>⚠️</Emoji> {error}</span> <br/>
+      <button onClick={fetchTop5} style={{ marginTop: '15px', padding: '10px 20px', cursor: 'pointer', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <Emoji>🔄</Emoji> 다시 시도
       </button>
     </div>
   );
@@ -143,7 +136,7 @@ export default function TopRankingTab() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '15px' }}>
         <div>
           <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            🏆 플랫폼별 매출 TOP 5 랭킹
+            <Emoji>🏆</Emoji> 플랫폼별 매출 TOP 5 랭킹
           </h2>
           <p style={{ margin: '8px 0 0 0', fontSize: '14px', color: themeVars.textMuted }}>
             * E상인(ERP)의 실제 거래처 매출 전표 데이터를 기반으로 집계됩니다.
@@ -175,7 +168,7 @@ export default function TopRankingTab() {
             borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)'
           }}>
             <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', borderBottom: `2px solid ${themeVars.border}`, paddingBottom: '10px' }}>
-              {platform}
+              <EmojiText text={platform} />
             </h3>
             
             {items && items.length > 0 ? (
@@ -187,10 +180,10 @@ export default function TopRankingTab() {
                   return (
                   <li key={idx} style={{
                     display: 'flex', alignItems: 'center', gap: '12px',
-                    background: isLowMargin ? (isLight ? 'rgba(255,77,79,0.05)' : 'rgba(255,77,79,0.04)') : themeVars.cardBg, padding: '12px', borderRadius: '10px', border: `1px solid ${isLowMargin ? 'rgba(255,77,79,0.25)' : themeVars.border}`
+                    background: isLowMargin ? 'color-mix(in srgb, var(--danger) 6%, transparent)' : themeVars.cardBg, padding: '12px', borderRadius: '10px', border: `1px solid ${isLowMargin ? 'color-mix(in srgb, var(--danger) 25%, transparent)' : themeVars.border}`
                   }}>
                     <div style={{
-                      fontSize: '18px', fontWeight: '900', color: idx === 0 ? '#ff4d4f' : idx === 1 ? '#ff9900' : idx === 2 ? '#2fd37a' : 'gray',
+                      fontSize: '18px', fontWeight: '900', color: idx === 0 ? 'var(--danger)' : idx === 1 ? 'var(--amber)' : idx === 2 ? 'var(--success)' : 'var(--text-3)',
                       width: '24px', textAlign: 'center'
                     }}>
                       {idx + 1}
@@ -199,11 +192,11 @@ export default function TopRankingTab() {
                       {item.name}
                     </div>
                     {marginRate !== null && marginRate !== undefined && (
-                      <div style={{ fontSize: '12px', fontWeight: 'bold', color: isLowMargin ? '#ff4d4f' : (isLight ? '#16a34a' : '#4ade80'), whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold', color: isLowMargin ? 'var(--danger)' : 'var(--success)', whiteSpace: 'nowrap' }}>
                         마진 {marginRate.toFixed(1)}%
                       </div>
                     )}
-                    <div style={{ fontWeight: '900', color: '#2f6bff' }}>
+                    <div style={{ fontWeight: '900', color: 'var(--accent)' }}>
                       {item.qty}개
                     </div>
                   </li>
