@@ -296,6 +296,17 @@ def _match_option_combination(combinations, option_id, option_name):
     return None
 
 
+def _find_origin_product_no(channel_product_no):
+    """일부 스마트스토어 상품은 v2 상세조회(GET channel-products/{id}) 응답에
+    originProductNo가 아예 빠져 있다(실제 상품으로 확인됨, 2026-08-27 — 네이버 쪽 문서에도
+    "일부 상품은 원상품번호가 응답에 포함되지 않을 수 있음"이라고 나옴). 대신 상품 목록
+    검색(get_my_products, v1 검색 API)에는 originProductNo가 포함되어 있어서 그걸로 찾는다."""
+    for p in get_my_products():
+        if str(p.get("channelProductNo")) == str(channel_product_no):
+            return p.get("originProductNo")
+    return None
+
+
 def update_naver_option_prices(channel_product_no, option_updates):
     """같은 상품(channel_product_no)의 여러 옵션 가격을 GET 1회 + PUT 1회로 한번에 갱신한다.
     옵션마다 따로 GET→PUT 하면 뒤의 PUT이 앞의 PUT을 못 보고 덮어써서 유실될 수 있어 반드시 배치로 처리한다.
@@ -326,7 +337,7 @@ def update_naver_option_prices(channel_product_no, option_updates):
 
     data = res.json()
     origin = data.get("originProduct", {}) or {}
-    origin_no = origin.get("originProductNo")
+    origin_no = origin.get("originProductNo") or _find_origin_product_no(channel_product_no)
     sale_price = origin.get("salePrice")
     # 실제 GET 응답으로 확인됨(2026-08-27): optionInfo는 originProduct 최상위가 아니라
     # originProduct.detailAttribute.optionInfo에 들어있다. 최상위에서 읽으면 항상 {}가 되어
@@ -415,7 +426,7 @@ def update_naver_sale_price(channel_product_no, new_price):
 
     data = res.json()
     origin = data.get("originProduct", {}) or {}
-    origin_no = origin.get("originProductNo")
+    origin_no = origin.get("originProductNo") or _find_origin_product_no(channel_product_no)
     if not origin_no:
         return False, "originProductNo 정보를 찾을 수 없습니다."
 

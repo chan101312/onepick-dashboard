@@ -41,6 +41,28 @@ class TestMatchOptionCombination(unittest.TestCase):
         self.assertIsNone(found)
 
 
+class TestFindOriginProductNo(unittest.TestCase):
+    """일부 스마트스토어 상품은 v2 상세조회 응답에 originProductNo가 없어서(실 상품으로 확인됨),
+    상품 목록 검색(get_my_products)에서 찾아오는 폴백 로직."""
+
+    @patch.object(naver_api, "get_my_products")
+    def test_finds_matching_product_by_channel_product_no(self, mock_get_products):
+        mock_get_products.return_value = [
+            {"name": "다른상품", "channelProductNo": "111", "originProductNo": 999},
+            {"name": "대상상품", "channelProductNo": "11060989411", "originProductNo": 11008768170},
+        ]
+        result = naver_api._find_origin_product_no("11060989411")
+        self.assertEqual(result, 11008768170)
+
+    @patch.object(naver_api, "get_my_products")
+    def test_returns_none_when_not_found(self, mock_get_products):
+        mock_get_products.return_value = [
+            {"name": "다른상품", "channelProductNo": "111", "originProductNo": 999},
+        ]
+        result = naver_api._find_origin_product_no("no-such-channel-no")
+        self.assertIsNone(result)
+
+
 class TestUpdateNaverOptionPrices(unittest.TestCase):
     def _detail_response(self):
         res = MagicMock()
@@ -131,6 +153,69 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
         combos_by_id = {c["id"]: c for c in sent_payload["detailAttribute"]["optionInfo"]["optionCombinations"]}
         self.assertEqual(combos_by_id[222]["price"], 300)  # 원본 그대로
 
+    @patch.object(naver_api, "get_my_products")
+    @patch.object(naver_api, "get_access_token", return_value="tok")
+    @patch.object(naver_api, "_request")
+    def test_falls_back_to_search_when_origin_product_no_missing(self, mock_request, mock_token, mock_get_products):
+        """일부 스마트스토어 상품은 상세조회 응답에 originProductNo가 없다(실 상품으로 확인, 2026-08-27)
+        — 이 경우 get_my_products()에서 찾아서 채워야 PUT 대상 URL을 만들 수 있다."""
+        get_res = MagicMock()
+        get_res.status_code = 200
+        get_res.json.return_value = {
+            "originProduct": {
+                # originProductNo 없음 — 실제 응답과 동일한 상황
+                "name": "테스트상품", "salePrice": 5000, "stockQuantity": 10, "detailContent": "내용",
+                "detailAttribute": {
+                    "optionInfo": {
+                        "optionCombinations": [{"id": 111, "optionName1": "30g", "price": 0}]
+                    }
+                },
+                "deliveryInfo": {},
+            }
+        }
+        put_res = MagicMock()
+        put_res.status_code = 200
+        mock_request.side_effect = [get_res, put_res]
+        mock_get_products.return_value = [
+            {"name": "테스트상품", "channelProductNo": "channel1", "originProductNo": 8888},
+        ]
+
+        results = naver_api.update_naver_option_prices("channel1", [
+            {"option_id": "111", "option_name": "30g", "new_price": 5100},
+        ])
+
+        self.assertTrue(results[0]["success"])
+        put_call = mock_request.call_args_list[1]
+        self.assertIn("/origin-products/8888", put_call.args[1])
+
+    @patch.object(naver_api, "get_my_products")
+    @patch.object(naver_api, "get_access_token", return_value="tok")
+    @patch.object(naver_api, "_request")
+    def test_fails_cleanly_when_origin_product_no_unfindable(self, mock_request, mock_token, mock_get_products):
+        get_res = MagicMock()
+        get_res.status_code = 200
+        get_res.json.return_value = {
+            "originProduct": {
+                "name": "테스트상품", "salePrice": 5000, "stockQuantity": 10, "detailContent": "내용",
+                "detailAttribute": {
+                    "optionInfo": {
+                        "optionCombinations": [{"id": 111, "optionName1": "30g", "price": 0}]
+                    }
+                },
+                "deliveryInfo": {},
+            }
+        }
+        mock_request.side_effect = [get_res]
+        mock_get_products.return_value = []  # 검색해도 못 찾음
+
+        results = naver_api.update_naver_option_prices("channel1", [
+            {"option_id": "111", "option_name": "30g", "new_price": 5100},
+        ])
+
+        self.assertFalse(results[0]["success"])
+        self.assertIn("originProductNo", results[0]["message"])
+        self.assertEqual(mock_request.call_count, 1)  # GET만 호출, PUT 시도 안 함
+
 
 class TestUpdateNaverOptionPricesExceptionHandling(unittest.TestCase):
     @patch.object(naver_api, "get_access_token", return_value="tok")
@@ -197,6 +282,30 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
         self.assertTrue(ok)
         put_call = mock_request.call_args_list[1]
         self.assertEqual(put_call.kwargs["json"]["salePrice"], 6000)
+
+    @patch.object(naver_api, "get_my_products")
+    @patch.object(naver_api, "get_access_token", return_value="tok")
+    @patch.object(naver_api, "_request")
+    def test_falls_back_to_search_when_origin_product_no_missing(self, mock_request, mock_token, mock_get_products):
+        get_res = MagicMock()
+        get_res.status_code = 200
+        get_res.json.return_value = {"originProduct": {
+            # originProductNo 없음
+            "name": "테스트상품", "salePrice": 5000,
+            "stockQuantity": 10, "detailContent": "내용", "detailAttribute": {}, "deliveryInfo": {},
+        }}
+        put_res = MagicMock()
+        put_res.status_code = 200
+        mock_request.side_effect = [get_res, put_res]
+        mock_get_products.return_value = [
+            {"name": "테스트상품", "channelProductNo": "channel1", "originProductNo": 8888},
+        ]
+
+        ok, msg = naver_api.update_naver_sale_price("channel1", 6000)
+
+        self.assertTrue(ok)
+        put_call = mock_request.call_args_list[1]
+        self.assertIn("/origin-products/8888", put_call.args[1])
 
     @patch.object(naver_api, "get_access_token", return_value="tok")
     @patch.object(naver_api, "_request")
