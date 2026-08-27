@@ -279,14 +279,20 @@ def get_naver_product_detail(channel_product_no):
 def _match_option_combination(combinations, option_id, option_name):
     """optionCombinations 리스트에서 대상 옵션을 찾는다.
     1순위: option_id와 combo['id']가 일치. 2순위(폴백): option_name과 combo['optionName1']이 일치.
-    id가 PUT 이후에도 유지되는지 문서로 확증 안 돼서, id가 안 맞을 가능성에 대비한 폴백이다."""
+    id가 PUT 이후에도 유지되는지 문서로 확증 안 돼서, id가 안 맞을 가능성에 대비한 폴백이다.
+    ⚠️ 폴백 매칭 시 이름 중복이 있으면 (2차원 옵션 등) 모호하므로 None 반환 — 틀린 옵션에 가격을 쓰는 위험을 피한다."""
     requested_id = str(option_id) if option_id else None
     if requested_id:
         found = next((c for c in combinations if str(c.get("id")) == requested_id), None)
         if found is not None:
             return found
     if option_name:
-        return next((c for c in combinations if str(c.get("optionName1")) == str(option_name)), None)
+        matching = [c for c in combinations if str(c.get("optionName1")) == str(option_name)]
+        if len(matching) == 1:
+            return matching[0]
+        elif len(matching) > 1:
+            # 같은 이름의 옵션이 여러 개 있으면 (2차원 옵션 등) 모호하므로 None 반환
+            return None
     return None
 
 
@@ -309,7 +315,12 @@ def update_naver_option_prices(channel_product_no, option_updates):
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
-    res = _request("GET", url, headers=headers)
+
+    try:
+        res = _request("GET", url, headers=headers)
+    except Exception as e:
+        return fail_all(f"조회에러: {e}")
+
     if res.status_code != 200:
         return fail_all(f"조회실패: {res.text[:200]}")
 
@@ -357,7 +368,16 @@ def update_naver_option_prices(channel_product_no, option_updates):
     if origin.get("images"):
         update_payload["images"] = origin["images"]
 
-    put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    try:
+        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    except Exception as e:
+        put_err_msg = f"PUT 에러: {e}"
+        for r in results:
+            if r["success"]:
+                r["success"] = False
+                r["message"] = put_err_msg
+        return results
+
     put_ok = put_res.status_code == 200
     put_msg = "성공" if put_ok else f"네이버 거부: {put_res.text[:300]}"
     for r in results:
@@ -378,7 +398,12 @@ def update_naver_sale_price(channel_product_no, new_price):
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
-    res = _request("GET", url, headers=headers)
+
+    try:
+        res = _request("GET", url, headers=headers)
+    except Exception as e:
+        return False, f"조회에러: {e}"
+
     if res.status_code != 200:
         return False, f"조회실패: {res.text[:200]}"
 
@@ -403,7 +428,11 @@ def update_naver_sale_price(channel_product_no, new_price):
     if origin.get("optionInfo"):
         update_payload["optionInfo"] = origin["optionInfo"]
 
-    put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    try:
+        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    except Exception as e:
+        return False, f"PUT 에러: {e}"
+
     if put_res.status_code == 200:
         return True, "성공"
     return False, f"네이버 거부: {put_res.text[:300]}"
