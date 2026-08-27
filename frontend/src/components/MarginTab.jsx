@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../apiBase';
-import { useTheme } from '../ThemeContext';
 import { Emoji, EmojiText } from './Icons';
+import Pagination from './Pagination';
 
 export default function MarginTab() {
   const [file, setFile] = useState(null);
@@ -9,17 +9,6 @@ export default function MarginTab() {
   const [summaryData, setSummaryData] = useState([]);
   const [isCalculating, setIsCalculating] = useState(false);
   const [sortType, setSortType] = useState("default");
-  const { theme } = useTheme();
-  
-  const isLight = theme === 'light';
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   const [fees, setFees] = useState(() => {
     const savedFees = localStorage.getItem('marginFees');
     return savedFees ? JSON.parse(savedFees) : { naver: 6.0, coupang: 11.0, baemin: 11.0, lotteon: 13.0, sikbom: 6.0 };
@@ -42,14 +31,142 @@ export default function MarginTab() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const pageGroupSize = 5; 
 
   const [priceAlerts, setPriceAlerts] = useState([]);
-  
+
   const [ackPrices, setAckPrices] = useState(() => {
     const savedPrices = localStorage.getItem('acknowledgedPrices');
     return savedPrices ? JSON.parse(savedPrices) : {};
   });
+
+  // 🔗 채널(쿠팡/네이버/식봄) 연결
+  const CHANNEL_LABELS = { coupang: '쿠팡', naver: '네이버', sikbom: '식봄' };
+  const [channelLinks, setChannelLinks] = useState({}); // { 상품명: { coupang: {id,name,linked_at}, ... } }
+  const [linkModalProduct, setLinkModalProduct] = useState(null); // 열려있는 모달의 상품명 (null이면 닫힘)
+  const [linkCandidates, setLinkCandidates] = useState(null); // { coupang: [...], naver: [...], sikbom: [...] }
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [selectedCandidates, setSelectedCandidates] = useState({}); // { coupang: {id,name}|null, naver: ..., sikbom: ... }
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState(""); // 모달 검색창의 현재 입력값
+
+  // 💰 원가 저장 시 채널 가격 변경 미리보기
+  const [priceChanges, setPriceChanges] = useState(null); // null이면 모달 닫힘, 배열이면 열림
+  const [priceChangeSelected, setPriceChangeSelected] = useState({}); // { idx: boolean }
+  const [isSyncingPrices, setIsSyncingPrices] = useState(false);
+  const [priceSyncResults, setPriceSyncResults] = useState(null); // null이면 아직 반영 전, 배열이면 반영 결과 표시
+
+  const fetchChannelLinks = () => {
+    fetch(`${API_BASE}/api/channel-link`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
+      .then(res => res.json())
+      .then(data => { if (data.status === 'success') setChannelLinks(data.data || {}); })
+      .catch(err => console.error('채널 연결 목록 조회 실패', err));
+  };
+
+  // 이미 연결된 채널은 그 후보가 선택된 상태로 시작한다 (API 호출 없이 로컬 channelLinks만 사용).
+  const computeInitialSelection = (productName) => {
+    const linked = channelLinks[productName] || {};
+    const initialSelection = {};
+    Object.keys(CHANNEL_LABELS).forEach((channel) => {
+      if (linked[channel]) initialSelection[channel] = { id: linked[channel].id, name: linked[channel].name };
+    });
+    return initialSelection;
+  };
+
+  // productName: 실제로 연결 대상인 상품명(고정) / keyword: 채널 후보 검색에 쓸 검색어(재검색 시 바뀜)
+  const runChannelSearch = (productName, keyword) => {
+    setLinkCandidates(null);
+    setLinkLoading(true);
+    fetch(`${API_BASE}/api/channel-link/search?product_name=${encodeURIComponent(keyword)}`, {
+      headers: { 'ngrok-skip-browser-warning': '69420' }
+    })
+      .then(res => res.json())
+      .then(data => {
+        setLinkCandidates(data.status === 'success' ? data.candidates : { coupang: [], naver: [], sikbom: [] });
+        setSelectedCandidates(computeInitialSelection(productName));
+        setLinkLoading(false);
+      })
+      .catch(err => {
+        console.error('채널 후보 검색 실패', err);
+        setLinkCandidates({ coupang: [], naver: [], sikbom: [] });
+        setLinkLoading(false);
+      });
+  };
+
+  // 모달을 열 때는 검색창에 상품명만 미리 채우고 선택 상태만 복원한다.
+  // 실제 후보 검색(API 호출)은 사용자가 "검색" 버튼을 누르거나 Enter를 칠 때만 실행한다.
+  const openLinkModal = (productName) => {
+    setLinkModalProduct(productName);
+    setSearchKeyword(productName);
+    setLinkCandidates(null);
+    setLinkLoading(false);
+    setSelectedCandidates(computeInitialSelection(productName));
+  };
+
+  const handleSearchCandidates = () => {
+    const keyword = searchKeyword.trim();
+    if (!keyword) {
+      alert('검색어를 입력해주세요.');
+      return;
+    }
+    runChannelSearch(linkModalProduct, keyword);
+  };
+
+  const closeLinkModal = () => {
+    setLinkModalProduct(null);
+    setLinkCandidates(null);
+    setSelectedCandidates({});
+    setSearchKeyword("");
+  };
+
+  const handleConnectSelected = async () => {
+    console.log('[DEBUG] handleConnectSelected 호출됨, selectedCandidates =', selectedCandidates);
+    const entries = Object.entries(selectedCandidates).filter(([, candidate]) => candidate);
+    console.log('[DEBUG] entries.length =', entries.length, entries);
+    if (entries.length === 0) {
+      console.log('[DEBUG] entries가 비어서 여기서 return됨 (confirm 도달 못 함)');
+      alert('연결할 채널을 선택해주세요.');
+      return;
+    }
+    console.log('[DEBUG] window.confirm 호출 직전');
+    const confirmed = window.confirm(`${entries.length}개 채널을 연결하시겠습니까?`);
+    console.log('[DEBUG] window.confirm 결과 =', confirmed);
+    if (!confirmed) {
+      return;
+    }
+    setIsConnecting(true);
+    for (const [channel, candidate] of entries) {
+      try {
+        const res = await fetch(`${API_BASE}/api/channel-link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
+          body: JSON.stringify({
+            product_name: linkModalProduct, channel,
+            channel_id: String(candidate.id), channel_name: candidate.name
+          })
+        });
+        const data = await res.json();
+        if (data.status !== 'success') {
+          alert(`${CHANNEL_LABELS[channel]} 연결 실패: ${data.message || '알 수 없는 오류'}`);
+        }
+      } catch (err) {
+        alert(`${CHANNEL_LABELS[channel]} 연결 실패: 서버에 연결할 수 없습니다. (${err.message})`);
+      }
+    }
+    setIsConnecting(false);
+    fetchChannelLinks();
+  };
+
+  const handleUnlinkChannel = (channel) => {
+    fetch(`${API_BASE}/api/channel-link/${encodeURIComponent(channel)}?product_name=${encodeURIComponent(linkModalProduct)}`, { method: 'DELETE' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          setSelectedCandidates(prev => ({ ...prev, [channel]: null }));
+          fetchChannelLinks();
+        } else alert(data.message || '연결 해제에 실패했습니다.');
+      })
+      .catch(err => alert(`연결 해제 실패: 서버에 연결할 수 없습니다. (${err.message})`));
+  };
 
   const fetchPriceAlerts = async () => {
     try {
@@ -152,7 +269,7 @@ export default function MarginTab() {
     fetchPriceAlerts();
   };
 
-  useEffect(() => { loadInitialData(); }, []);
+  useEffect(() => { loadInitialData(); fetchChannelLinks(); }, []);
 
   const handleAddRow = () => {
     const currentData = fullData || [];
@@ -233,19 +350,90 @@ export default function MarginTab() {
     })
     .then(res => res.json())
     .then(data => {
+      console.log('[DEBUG] 저장 응답:', data);
+      console.log('[DEBUG] data.price_changes:', data.price_changes, '/ 개수:', Array.isArray(data.price_changes) ? data.price_changes.length : 'N/A(배열 아님)');
       if (data.status === 'success') {
         const source = data.full_data || dataToUpdate || [];
         const recalculated = recalcFullDataWithFees(source, currentFees);
         setFullData(recalculated);
         setSummaryData(buildSummaryDataFromFull(recalculated));
-        if (showAlert) alert("✅ 데이터가 저장되고 최종 판매가가 업데이트되었습니다!"); 
-        fetchPriceAlerts(); 
+        fetchPriceAlerts();
+
+        const hasPriceChanges = Array.isArray(data.price_changes) && data.price_changes.length > 0;
+        console.log('[DEBUG] hasPriceChanges:', hasPriceChanges);
+        if (hasPriceChanges) {
+          const initialSelection = {};
+          data.price_changes.forEach((_, idx) => { initialSelection[idx] = true; });
+          setPriceChanges(data.price_changes);
+          setPriceChangeSelected(initialSelection);
+          setPriceSyncResults(null);
+          console.log('[DEBUG] setPriceChanges 호출 완료, 모달이 열려야 함');
+        } else if (showAlert) {
+          // 💡 가격 변경 미리보기 모달을 띄울 때는 굳이 blocking alert로 먼저 막지 않는다.
+          // alert()는 동기/블로킹이라 이 뒤의 setPriceChanges 호출이 사용자가 alert를 닫을 때까지
+          // 지연되어, "모달이 안 뜬다"처럼 보이는 원인이 된다.
+          alert("✅ 데이터가 저장되고 최종 판매가가 업데이트되었습니다!");
+        }
       } else if (showAlert) {
         alert(data.message || "서버 계산 중 오류가 발생했습니다.");
       }
       setIsCalculating(false);
     })
     .catch(err => { console.error('업데이트 에러:', err); setIsCalculating(false); });
+  };
+
+  const closePriceChangeModal = () => {
+    setPriceChanges(null);
+    setPriceChangeSelected({});
+    setPriceSyncResults(null);
+  };
+
+  const handleToggleSelectAllPriceChanges = () => {
+    const allSelected = (priceChanges || []).every((_, idx) => priceChangeSelected[idx]);
+    const next = {};
+    (priceChanges || []).forEach((_, idx) => { next[idx] = !allSelected; });
+    setPriceChangeSelected(next);
+  };
+
+  const handleNewPriceInputChange = (idx, value) => {
+    const parsed = value === '' ? 0 : Number(value);
+    setPriceChanges((prev) => prev.map((c, i) => (i === idx ? { ...c, new_price: parsed } : c)));
+  };
+
+  const handleSyncPrices = async () => {
+    const selectedChanges = (priceChanges || []).filter((_, idx) => priceChangeSelected[idx]);
+    if (selectedChanges.length === 0) {
+      alert('반영할 항목을 선택해주세요.');
+      return;
+    }
+    if (!window.confirm(`${selectedChanges.length}건을 채널에 반영하시겠습니까?`)) {
+      return;
+    }
+    setIsSyncingPrices(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/channel-price-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
+        body: JSON.stringify({
+          changes: selectedChanges.map(c => ({
+            product_name: c.product_name,
+            channel: c.channel,
+            channel_id: c.channel_id,
+            channel_name: c.channel_name,
+            new_price: c.new_price
+          }))
+        })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setPriceSyncResults(data.results || []);
+      } else {
+        alert(data.message || '채널 가격 반영에 실패했습니다.');
+      }
+    } catch (err) {
+      alert(`채널 가격 반영 실패: 서버에 연결할 수 없습니다. (${err.message})`);
+    }
+    setIsSyncingPrices(false);
   };
 
   const handleFeeChange = (platform, value) => {
@@ -501,11 +689,6 @@ export default function MarginTab() {
   const currentSummaryItems = filteredSummaryData.slice(indexOfFirst, indexOfLast);
   
   const totalPages = Math.max(1, Math.ceil(filteredFullData.length / itemsPerPage));
-  const currentGroup = Math.ceil(currentPage / pageGroupSize);
-  const startPage = (currentGroup - 1) * pageGroupSize + 1;
-  const endPage = Math.min(startPage + pageGroupSize - 1, totalPages);
-  const pages = [];
-  for (let i = startPage; i <= endPage; i++) pages.push(i);
 
   const getCleanColumns = (data) => {
     if (!data || data.length === 0 || !data[0]) return ['온라인 상품명', '매입가', '마진']; 
@@ -535,17 +718,6 @@ export default function MarginTab() {
     return pureName === "배민,쿠팡 택배비" ? "배민/쿠팡 택배비" : pureName;
   };
 
-  const themeVars = {
-    '--local-box': isLight ? '#f0f1f3' : 'rgba(255,255,255,0.02)',
-    '--local-text': isLight ? '#1a1a1a' : 'var(--text)',
-    '--local-text-muted': isLight ? '#4b5563' : 'var(--text-muted)',
-    '--local-border': isLight ? '#a0a9bf' : 'var(--border)',
-    '--local-input-bg': isLight ? '#e8eaef' : 'rgba(255,255,255,0.03)',
-    '--local-table-header': isLight ? '#dfe4f0' : 'transparent',
-    color: 'var(--local-text)',
-    transition: 'all 0.3s ease'
-  };
-
   const getPlatformColor = (colName) => {
     if (colName.includes('네이버')) return 'color-mix(in srgb, var(--success) 12%, transparent)';
     if (colName.includes('쿠팡')) return 'color-mix(in srgb, var(--danger) 12%, transparent)';
@@ -556,42 +728,31 @@ export default function MarginTab() {
   };
 
   return (
-    <div className="responsive-container" translate="no" style={themeVars}>
+    <div className="responsive-container" translate="no" style={{ color: 'var(--text)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <h2 style={{ textAlign: 'left', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📊</Emoji> 마진 산출 장부</h2>
+        <h2 style={{ textAlign: 'left', margin: 0, fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📊</Emoji> 마진 산출 장부</h2>
       </div>
-      
+
       {visibleAlerts.length > 0 && (
-        <div style={{ background: 'var(--local-box)', padding: '20px', borderRadius: '16px', border: `2px solid var(--local-border)`, marginBottom: '20px', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '16px', border: '1px solid var(--border)', marginBottom: '20px', boxSizing: 'border-box', width: '100%', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ margin: 0, color: 'var(--local-text)', fontSize: '18px', wordBreak: 'keep-all', lineHeight: '1.4', display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📢</Emoji> [알림] E상인 매입 단가 변동 감지!</h3>
+            <h3 style={{ margin: 0, color: 'var(--text)', fontSize: '16px', fontWeight: 700, wordBreak: 'keep-all', lineHeight: '1.4', display: 'flex', alignItems: 'center', gap: '8px' }}><Emoji>📢</Emoji> [알림] E상인 매입 단가 변동 감지!</h3>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ background: 'var(--local-input-bg)', border: '1px solid var(--local-border)', color: 'var(--local-text)', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                <span style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 14px', borderRadius: '999px', fontSize: '12px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                   미확인 알림 {visibleAlerts.length}건
                 </span>
-                
-                <button 
-                  onClick={handleConfirmAllAlerts}
-                  style={{ 
-                    background: isLight ? '#1a1a1a' : '#f0f0f0', 
-                    color: isLight ? '#ffffff' : '#1a1a1a', 
-                    border: 'none', padding: '6px 14px', 
-                    borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer',
-                    transition: 'all 0.2s', whiteSpace: 'nowrap'
-                  }}
-                  onMouseOver={(e) => { e.target.style.transform = 'scale(1.05)'; e.target.style.background = isLight ? '#404040' : '#ffffff'; }}
-                  onMouseOut={(e) => { e.target.style.transform = 'scale(1)'; e.target.style.background = isLight ? '#1a1a1a' : '#f0f0f0'; }}
-                >
+
+                <button onClick={handleConfirmAllAlerts} className="tab-btn-invert">
                   전체 확인 완료 <Emoji>🧹</Emoji>
                 </button>
               </div>
             </div>
 
-          <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: 'var(--local-text-muted)', fontWeight: 'bold', wordBreak: 'keep-all', lineHeight: '1.5' }}>
+          <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: 'var(--text-3)', fontWeight: 'bold', wordBreak: 'keep-all', lineHeight: '1.5' }}>
             * 매입 원가가 변동(인상/인하)되었습니다. 아래 표에서 원가를 수정하여 마진을 최신화하세요!
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px', boxSizing: 'border-box', width: '100%' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '10px', boxSizing: 'border-box', width: '100%' }}>
             {visibleAlerts.map((alert, idx) => {
               const isUp = alert.diff > 0;
               const colorCode = isUp ? 'var(--danger)' : 'var(--accent)';
@@ -599,17 +760,17 @@ export default function MarginTab() {
               const diffAbs = Math.abs(alert.diff);
 
               return (
-                <div key={idx} style={{ padding: '16px', background: 'var(--local-input-bg)', borderRadius: '12px', border: `1px solid ${colorCode}`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', height: '100%' }}>
+                <div key={idx} className="ui-card" style={{ padding: '14px', background: 'var(--surface-2)', borderRadius: '16px', border: `1px solid ${colorCode}`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box', width: '100%', height: '100%' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                    <strong style={{ color: 'var(--local-text)', fontSize: '15px', wordBreak: 'break-word', marginRight: '10px' }}>{alert.name}</strong>
+                    <strong style={{ color: 'var(--text)', fontSize: '14px', wordBreak: 'break-word', marginRight: '10px' }}>{alert.name}</strong>
                   </div>
                   {alert.spec && (
                     <div style={{ marginBottom: '14px' }}>
-                      <span style={{ color: 'var(--local-text-muted)', fontSize: '13px', background: 'var(--local-box)', padding: '4px 8px', borderRadius: '6px', border: `1px solid var(--local-border)`, display: 'inline-block' }}>{alert.spec}</span>
+                      <span style={{ color: 'var(--text-3)', fontSize: '12px', background: 'var(--surface)', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', display: 'inline-block' }}>{alert.spec}</span>
                     </div>
                   )}
-                  
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--local-text-muted)', marginBottom: '8px' }}>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text-3)', marginBottom: '8px' }}>
                     <span>기존 매입 단가:</span>
                     <span style={{ textDecoration: 'line-through' }}>{alert.oldPrice.toLocaleString()}원</span>
                   </div>
@@ -617,22 +778,17 @@ export default function MarginTab() {
                     <span>최근 매입 단가:</span>
                     <strong style={{ color: colorCode }}>{alert.newPrice.toLocaleString()}원</strong>
                   </div>
-                  
+
                   <div style={{ marginTop: 'auto' }}>
                     <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px dashed color-mix(in srgb, ${colorCode} 40%, transparent)`, fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--local-text-muted)' }}>{isUp ? '원가 인상폭:' : '원가 인하폭:'}</span>
-                      <strong style={{ color: colorCode, fontSize: '15px' }}>{sign} {diffAbs.toLocaleString()}원</strong>
+                      <span style={{ color: 'var(--text-3)' }}>{isUp ? '원가 인상폭:' : '원가 인하폭:'}</span>
+                      <strong style={{ color: colorCode, fontSize: '14px' }}>{sign} {diffAbs.toLocaleString()}원</strong>
                     </div>
 
-                    <button 
+                    <button
                       onClick={() => handleConfirmAlert(alert)}
-                      style={{ 
-                        marginTop: '16px', width: '100%', padding: '10px', 
-                        borderRadius: '8px', border: 'none', background: colorCode, 
-                        color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'opacity 0.2s', flexShrink: 0
-                      }}
-                      onMouseOver={(e) => e.target.style.opacity = '0.8'}
-                      onMouseOut={(e) => e.target.style.opacity = '1'}
+                      className="tab-cta-btn"
+                      style={{ marginTop: '16px', width: '100%', background: colorCode, justifyContent: 'center' }}
                     >
                       {isUp ? '인상 확인 완료' : '인하 확인 완료'}
                     </button>
@@ -644,36 +800,36 @@ export default function MarginTab() {
         </div>
       )}
 
-      <div style={{ marginBottom: '14px', padding: '14px', border: `1px dashed var(--local-border)`, borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', background: 'var(--local-box)' }}>
+      <div style={{ marginBottom: '14px', padding: '14px', border: '1px dashed var(--border)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', background: 'var(--surface)' }}>
         <div>
           <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>📥</Emoji> 새 단가표 업로드: </strong>
           <input type="file" accept=".csv, .xlsx" onChange={handleFileChange} style={{ maxWidth: '100%' }} />
         </div>
         {currentFileName && (
-          <div style={{ backgroundColor: 'color-mix(in srgb, var(--success) 12%, transparent)', padding: '6px 12px', borderRadius: '999px', color: 'var(--local-text)', border: `1px solid var(--local-border)`, fontWeight: 700, fontSize: '12px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>📄</Emoji> 파일: {currentFileName}</div>
+          <div style={{ backgroundColor: 'color-mix(in srgb, var(--success) 12%, transparent)', padding: '6px 12px', borderRadius: '999px', color: 'var(--text)', border: '1px solid var(--border)', fontWeight: 700, fontSize: '12px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>📄</Emoji> 파일: {currentFileName}</div>
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '6px', backgroundColor: 'var(--local-box)', padding: '14px', borderRadius: '14px', flexWrap: 'wrap', border: `1px solid var(--local-border)` }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '6px', backgroundColor: 'var(--surface)', padding: '14px', borderRadius: '16px', flexWrap: 'wrap', border: '1px solid var(--border)' }}>
         {Object.entries({
           '🟢 네이버': 'naver', '🚀 쿠팡': 'coupang', '🛵 배민': 'baemin', /* 🚫 롯데온 판매 중단: '🔴 롯데온': 'lotteon', */ '🥬 식봄': 'sikbom'
         }).map(([label, key]) => (
           <div key={key} style={{ flex: '1 1 120px' }}>
-            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}><EmojiText text={label} /> (%)</label>
-            <input type="number" step="0.1" value={fees[key]} onChange={(e) => handleFeeChange(key, parseFloat(e.target.value))} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', boxSizing: 'border-box' }} />
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px', fontSize: '12px' }}><EmojiText text={label} /> (%)</label>
+            <input type="number" step="0.1" value={fees[key]} onChange={(e) => handleFeeChange(key, parseFloat(e.target.value))} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px', boxSizing: 'border-box' }} />
           </div>
         ))}
         <div style={{ flex: '1 1 120px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px', color: 'var(--danger)' }}><Emoji>⚠️</Emoji> 경고 기준 마진율 (%)</label>
-          <input type="number" step="0.1" value={marginThreshold} onChange={(e) => handleThresholdChange(e.target.value)} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)', borderRadius: '6px', boxSizing: 'border-box' }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', marginBottom: '5px', fontSize: '12px', color: 'var(--danger)' }}><Emoji>⚠️</Emoji> 경고 기준 마진율 (%)</label>
+          <input type="number" step="0.1" value={marginThreshold} onChange={(e) => handleThresholdChange(e.target.value)} style={{ width: '100%', padding: '6px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', border: '1px solid color-mix(in srgb, var(--danger) 50%, transparent)', borderRadius: '6px', boxSizing: 'border-box' }} />
         </div>
       </div>
-      <p style={{ color: 'var(--local-text-muted)', margin: '0 0 14px 0', fontSize: '0.85rem', wordBreak: 'keep-all' }}>
+      <p style={{ color: 'var(--text-3)', margin: '0 0 14px 0', fontSize: '12px', wordBreak: 'keep-all' }}>
         기준 원가(매입+자재비+마진+택배비)에서 선택한 채널 수수료를 적용한 자동 추천 판매가를 표시합니다.
       </p>
 
-      <div style={{ marginBottom: '14px', padding: '14px', backgroundColor: 'var(--local-box)', borderRadius: '14px', display: 'flex', alignItems: 'center', gap: '10px', border: `1px solid var(--local-border)` }}>
-        <input type="text" placeholder="검색어 입력..." value={searchTerm} onChange={handleSearchChange} style={{ flex: 1, backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, padding: '10px', borderRadius: '8px' }} />
+      <div style={{ marginBottom: '14px', padding: '14px', backgroundColor: 'var(--surface)', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid var(--border)' }}>
+        <input type="text" placeholder="검색어 입력..." value={searchTerm} onChange={handleSearchChange} style={{ flex: 1, backgroundColor: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)', padding: '10px', borderRadius: '8px' }} />
       </div>
 
       <div style={{ position: 'relative' }}>
@@ -683,26 +839,26 @@ export default function MarginTab() {
           <div style={{ opacity: isCalculating ? 0.4 : 1, transition: 'opacity 0.2s' }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', gap: '10px', flexWrap: 'wrap' }}>
-              <h3 style={{ color: 'var(--local-text)', margin: 0, fontSize: '14px', fontWeight: 750, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>💰</Emoji> 1. 원가 및 상세 내역</h3>
-              
+              <h3 style={{ color: 'var(--text)', margin: 0, fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>💰</Emoji> 1. 원가 및 상세 내역</h3>
+
               <div className='responsive-btn-container' style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <select value={sortType} onChange={(e) => { setSortType(e.target.value); setCurrentPage(1); }} style={{ padding: '9px 12px', borderRadius: '10px', border: `1px solid var(--local-border)`, background: 'var(--local-input-bg)', color: 'var(--local-text)', outline: 'none', cursor: 'pointer', fontWeight: 700 }}>
-                  <option value="default" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>📋 등록된 순서</option>
-                  <option value="nameAsc" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>🔤 이름 가나다순</option>
-                  <option value="nameDesc" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>🔡 이름 역순</option>
-                  <option value="marginDesc" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>💸 마진 높은 순</option>
+                <select value={sortType} onChange={(e) => { setSortType(e.target.value); setCurrentPage(1); }} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', outline: 'none', cursor: 'pointer', fontWeight: 700 }}>
+                  <option value="default">📋 등록된 순서</option>
+                  <option value="nameAsc">🔤 이름 가나다순</option>
+                  <option value="nameDesc">🔡 이름 역순</option>
+                  <option value="marginDesc">💸 마진 높은 순</option>
                 </select>
-                <button className="responsive-btn" onClick={handleAddRow} style={{ background: 'var(--local-input-bg)', color: 'var(--local-text)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: `1px solid var(--local-border)`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>➕</Emoji> 상품 추가</button>
-                <button className="responsive-btn" onClick={handleRefreshData} style={{ background: 'color-mix(in srgb, var(--amber) 10%, transparent)', color: 'var(--amber)', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>🔄</Emoji> 데이터 최신화</button>
-                <button className="responsive-btn" onClick={() => updateMarginWithData(safeFullData, fees, true)} style={{ background: 'linear-gradient(180deg, var(--accent), var(--accent-2))', color: '#fff', padding: '10px 14px', borderRadius: '10px', fontWeight: 750, border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>💾</Emoji> 확인 및 저장</button>
+                <button className="responsive-btn esangin-btn" onClick={handleAddRow} style={{ background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--border)' }}><Emoji>➕</Emoji> 상품 추가</button>
+                <button className="responsive-btn esangin-btn" onClick={handleRefreshData} style={{ background: 'color-mix(in srgb, var(--amber) 10%, transparent)', color: 'var(--amber)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)' }}><Emoji>🔄</Emoji> 데이터 최신화</button>
+                <button className="responsive-btn esangin-btn" onClick={() => updateMarginWithData(safeFullData, fees, true)} style={{ background: 'var(--accent)' }}><Emoji>💾</Emoji> 확인 및 저장</button>
               </div>
             </div>
 
-            <div className="responsive-overflow" style={{ overflowX: 'auto', paddingBottom: '10px', marginTop: '10px', minHeight: '520px', background: 'var(--local-box)', borderRadius: '12px' }}>
+            <div className="responsive-overflow" style={{ overflowX: 'auto', paddingBottom: '10px', marginTop: '10px', minHeight: '520px', background: 'var(--surface)', borderRadius: '16px' }}>
               <table border="0" style={{ tableLayout: 'fixed', width: '100%', minWidth: '850px', borderCollapse: 'collapse', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                <thead style={{ background: 'var(--local-table-header)' }}>
+                <thead style={{ background: 'var(--surface-2)' }}>
                   <tr>
-                    <th style={{ padding: '8px', width: '60px' }}>관리</th>
+                    <th style={{ padding: '8px', width: '110px' }}>관리</th>
                     <th style={{ padding: '8px', width: '140px', fontSize: '13px' }}>과세구분</th>
                     {columnsWithVat.map(col => (
                       <th key={col} style={{ padding: '8px', fontSize: '13px', width: col.includes('상품명') ? '220px' : '85px' }}>
@@ -719,28 +875,44 @@ export default function MarginTab() {
                     const vatText = vatInfo
                       ? (vatInfo.min === vatInfo.max ? `${vatInfo.min.toLocaleString()}원` : `${vatInfo.min.toLocaleString()}~${vatInfo.max.toLocaleString()}원`)
                       : '-';
+                    const productName = row['온라인 상품명'] || row['상품명'] || '';
+                    const linkedChannels = channelLinks[productName] || {};
                     return (
-                      <tr key={globalIndex} style={{ borderBottom: `1px solid var(--local-border)`, backgroundColor: marginInfo.isLow ? (isLight ? 'rgba(255,77,79,0.05)' : 'rgba(255,77,79,0.04)') : 'transparent' }}>
-                        <td style={{ padding: '6px', verticalAlign: 'top' }}><button onClick={() => handleDeleteRow(globalIndex)} style={{ backgroundColor: 'transparent', color: 'var(--danger)', border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)', borderRadius: '10px', cursor: 'pointer', padding: '8px 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🗑️</Emoji> 삭제</button></td>
+                      <tr key={globalIndex} style={{ borderBottom: '1px solid var(--border)', backgroundColor: marginInfo.isLow ? 'color-mix(in srgb, var(--danger) 5%, transparent)' : 'transparent' }}>
                         <td style={{ padding: '6px', verticalAlign: 'top' }}>
-                          <select value={row['과세구분'] || '과세'} onChange={(e) => handleTaxTypeChange(globalIndex, e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', border: `1px solid var(--local-border)`, borderRadius: '10px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', fontWeight: 700, cursor: 'pointer' }}>
-                            <option value="과세" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>과세</option>
-                            <option value="면세" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>면세</option>
-                            <option value="과세(매입세액불공제)" title="매입세액 공제가 없는 과세 상품 (예: 계산서 매입 농산물) - 판매가 전체에 부가세 적용" style={{ background: isLight ? '#fff' : '#1e1e1e', color: isLight ? '#000' : '#fff' }}>과세(매입세액불공제)</option>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                            <button onClick={() => handleDeleteRow(globalIndex)} className="tab-icon-btn danger" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🗑️</Emoji> 삭제</button>
+                            <button onClick={() => openLinkModal(productName)} className="tab-icon-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🔗</Emoji> 채널 연결</button>
+                            {Object.keys(linkedChannels).length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                                {Object.keys(CHANNEL_LABELS).filter(ch => linkedChannels[ch]).map(ch => (
+                                  <span key={ch} title={linkedChannels[ch].name} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '999px', background: 'color-mix(in srgb, var(--success) 14%, transparent)', color: 'var(--success)', border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)' }}>
+                                    {CHANNEL_LABELS[ch]}✓
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '6px', verticalAlign: 'top' }}>
+                          <select value={row['과세구분'] || '과세'} onChange={(e) => handleTaxTypeChange(globalIndex, e.target.value)} style={{ width: '100%', padding: '8px', fontSize: '11px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', fontWeight: 700, cursor: 'pointer' }}>
+                            <option value="과세">과세</option>
+                            <option value="면세">면세</option>
+                            <option value="과세(매입세액불공제)" title="매입세액 공제가 없는 과세 상품 (예: 계산서 매입 농산물) - 판매가 전체에 부가세 적용">과세(매입세액불공제)</option>
                           </select>
                         </td>
                         {columnsWithVat.map(col => {
                           if (col === VAT_COLUMN_KEY) {
                             return (
                               <td key={col} style={{ padding: '5px', verticalAlign: 'top' }}>
-                                <input type="text" readOnly value={vatText} title={vatInfo ? '과세 상품 부가세 예상 범위 (플랫폼별 상이 - 표2 참고)' : undefined} style={{ width: '100%', padding: '10px', border: `1px solid var(--local-border)`, borderRadius: '10px', backgroundColor: 'var(--local-input-bg)', color: isLight ? '#6b7280' : '#9ca3af', textAlign: 'right', boxSizing: 'border-box', cursor: 'default' }} />
+                                <input type="text" readOnly value={vatText} title={vatInfo ? '과세 상품 부가세 예상 범위 (플랫폼별 상이 - 표2 참고)' : undefined} style={{ width: '100%', padding: '10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text-3)', textAlign: 'right', boxSizing: 'border-box', cursor: 'default' }} />
                               </td>
                             );
                           }
                           const isNameCol = col.includes('상품명');
                           return (
                             <td key={col} style={{ padding: '5px', verticalAlign: 'top' }}>
-                              <input type="text" value={row[col] === null || row[col] === undefined ? "" : row[col]} onChange={(e) => handleCellChange(globalIndex, col, e.target.value)} style={{ width: '100%', padding: '10px', border: `1px solid var(--local-border)`, borderRadius: '10px', backgroundColor: 'var(--local-input-bg)', color: 'var(--local-text)', textAlign: isNameCol ? 'left' : 'right', boxSizing: 'border-box' }} />
+                              <input type="text" value={row[col] === null || row[col] === undefined ? "" : row[col]} onChange={(e) => handleCellChange(globalIndex, col, e.target.value)} style={{ width: '100%', padding: '10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', textAlign: isNameCol ? 'left' : 'right', boxSizing: 'border-box' }} />
                             </td>
                           );
                         })}
@@ -751,21 +923,17 @@ export default function MarginTab() {
               </table>
             </div>
 
-            <div className="margin-pagination" aria-label="페이지 네비게이션" style={{ display: 'flex', justifyContent: 'center', gap: isMobile ? '6px' : '8px', marginTop: '16px', flexWrap: 'wrap', paddingBottom: '12px', width: '100%' }}>
-              <button className="margin-pagination-btn" onClick={() => setCurrentPage(startPage - 1)} disabled={startPage === 1} style={{ flexShrink: 0, whiteSpace: 'nowrap', background: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', padding: isMobile ? '6px 10px' : '8px 14px', fontSize: isMobile ? '12px' : '14px', cursor: 'pointer', opacity: startPage === 1 ? 0.5 : 1 }}>◀ 이전</button>
-              {pages.map(number => (
-                <button key={number} className={`margin-page-number ${currentPage === number ? 'active' : ''}`} onClick={() => setCurrentPage(number)} style={{ flexShrink: 0, background: currentPage === number ? '#2f6bff' : 'var(--local-input-bg)', color: currentPage === number ? '#fff' : 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', padding: isMobile ? '6px 10px' : '8px 14px', fontSize: isMobile ? '12px' : '14px', cursor: 'pointer', fontWeight: currentPage === number ? 'bold' : 'normal', minWidth: isMobile ? '32px' : '40px' }}>{number}</button>
-              ))}
-              <button className="margin-pagination-btn" onClick={() => setCurrentPage(endPage + 1)} disabled={endPage === totalPages} style={{ flexShrink: 0, whiteSpace: 'nowrap', background: 'var(--local-input-bg)', color: 'var(--local-text)', border: `1px solid var(--local-border)`, borderRadius: '6px', padding: isMobile ? '6px 10px' : '8px 14px', fontSize: isMobile ? '12px' : '14px', cursor: 'pointer', opacity: endPage === totalPages ? 0.5 : 1 }}>다음 ▶</button>
+            <div style={{ marginTop: '16px', paddingBottom: '12px' }}>
+              <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
             </div>
 
-            <h3 style={{ marginTop: '28px', color: 'var(--local-text)', borderTop: `1px solid var(--local-border)`, paddingTop: '14px', fontSize: '14px', fontWeight: 750, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>🛍️</Emoji> 2. 플랫폼별 최종 판매가</h3>
-            <div className="responsive-overflow" style={{ overflowX: 'auto', paddingBottom: '10px', minHeight: '480px', background: 'var(--local-box)', borderRadius: '12px' }}>
+            <h3 style={{ marginTop: '28px', color: 'var(--text)', borderTop: '1px solid var(--border)', paddingTop: '14px', fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>🛍️</Emoji> 2. 플랫폼별 최종 판매가</h3>
+            <div className="responsive-overflow" style={{ overflowX: 'auto', paddingBottom: '10px', minHeight: '480px', background: 'var(--surface)', borderRadius: '16px' }}>
               <table border="0" style={{ tableLayout: 'fixed', width: '100%', minWidth: '700px', borderCollapse: 'collapse', textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <thead style={{ textAlign: 'center' }}>
                   <tr>
                     {summaryColumns.map(col => (
-                      <th key={col} style={{ padding: '12px', backgroundColor: getPlatformColor(col), width: col.includes('상품명') ? '220px' : '100px', borderBottom: `1px solid var(--local-border)`, fontSize: '12px' }}>{formatHeader(col)}</th>
+                      <th key={col} style={{ padding: '12px', backgroundColor: getPlatformColor(col), width: col.includes('상품명') ? '220px' : '100px', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>{formatHeader(col)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -773,21 +941,27 @@ export default function MarginTab() {
                   {currentSummaryItems.length > 0 ? currentSummaryItems.map((row, idx) => {
                     const marginInfo = getMarginInfo(currentFullItems[idx]);
                     return (
-                    <tr key={idx} style={{ borderBottom: `1px solid var(--local-border)`, backgroundColor: marginInfo.isLow ? (isLight ? 'rgba(255,77,79,0.05)' : 'rgba(255,77,79,0.04)') : 'transparent' }}>
+                    <tr key={idx} style={{ borderBottom: '1px solid var(--border)', backgroundColor: idx % 2 === 1 ? 'var(--surface-2)' : 'transparent' }}>
                       {summaryColumns.map((col, i) => {
                         const isNameCol = col.includes('상품명');
                         const platformLabel = col.replace(' 판매가', '');
                         const rate = !isNameCol ? marginInfo.rates[platformLabel] : null;
-                        const isLowCell = rate !== null && rate !== undefined && rate < marginThreshold;
+                        const rateColor = rate === null || rate === undefined
+                          ? 'var(--text)'
+                          : rate >= 10
+                            ? 'var(--success)'
+                            : rate >= 5
+                              ? 'color-mix(in srgb, var(--highlight) 65%, var(--text) 35%)'
+                              : 'var(--danger)';
                         return (
-                          <td key={i} style={{ padding: '12px', color: 'var(--local-text)', backgroundColor: isNameCol ? 'transparent' : getPlatformColor(col), textAlign: isNameCol ? 'left' : 'right', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' }}>
+                          <td key={i} style={{ padding: '12px', color: 'var(--text)', backgroundColor: isNameCol ? 'transparent' : getPlatformColor(col), textAlign: isNameCol ? 'left' : 'right', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '13px' }}>
                             {isNameCol ? (
                               row[col] || ''
                             ) : (
                               <>
                                 {typeof row[col] === 'number' ? row[col].toLocaleString() + '원' : (row[col] || "0원")}
                                 {rate !== null && rate !== undefined && (
-                                  <span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 'bold', color: isLowCell ? 'var(--danger)' : 'var(--success)' }}>
+                                  <span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 'bold', color: rateColor }}>
                                     ({rate.toFixed(1)}%)
                                   </span>
                                 )}
@@ -799,7 +973,7 @@ export default function MarginTab() {
                     </tr>
                     );
                   }) : (
-                    <tr><td colSpan={summaryColumns.length} style={{ padding: '30px', textAlign: 'center', color: 'gray' }}>데이터가 없습니다.</td></tr>
+                    <tr><td colSpan={summaryColumns.length} style={{ padding: '30px', textAlign: 'center', color: 'var(--text-3)' }}>데이터가 없습니다.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -810,6 +984,223 @@ export default function MarginTab() {
           !isCalculating && <div style={{ textAlign: 'center', padding: '40px' }}><p>{loadMsg}</p></div>
         )}
       </div>
+
+      {linkModalProduct !== null && (
+        <div
+          onClick={closeLinkModal}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', width: '100%', maxWidth: '600px', maxHeight: '80vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          >
+            <div style={{ flexShrink: 0, padding: '20px 20px 14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>🔗</Emoji> 채널 연결</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-3)' }}>{linkModalProduct}</p>
+              </div>
+              <button onClick={closeLinkModal} className="tab-icon-btn"><Emoji>✕</Emoji></button>
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '0 20px 14px 20px', display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSearchCandidates(); }}
+                placeholder="검색어를 바꿔서 후보를 다시 찾아보세요 (특히 식봄)"
+                style={{ flex: 1, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px', boxSizing: 'border-box' }}
+              />
+              <button onClick={handleSearchCandidates} disabled={linkLoading} className="tab-icon-btn" style={{ whiteSpace: 'nowrap' }}>
+                <Emoji>🔍</Emoji> 검색
+              </button>
+            </div>
+
+            {linkLoading ? (
+              <div style={{ padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--text-3)', fontSize: '13px' }}>
+                <span className="searchSpinner" />
+                <span>검색 중...</span>
+              </div>
+            ) : (
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px 14px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {Object.entries(CHANNEL_LABELS).map(([channel, label]) => {
+                  const linked = (channelLinks[linkModalProduct] || {})[channel];
+                  const rawCandidates = (linkCandidates && linkCandidates[channel]) || [];
+                  // 이미 연결된 후보가 검색 결과에 없으면 목록 맨 위에 끼워넣어 선택 상태를 유지한다.
+                  const candidates = linked && !rawCandidates.some(c => String(c.id) === String(linked.id))
+                    ? [{ id: linked.id, name: linked.name }, ...rawCandidates]
+                    : rawCandidates;
+                  const selected = selectedCandidates[channel];
+
+                  return (
+                    <div key={channel} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>{label}</div>
+                        {linked && (
+                          <button onClick={() => handleUnlinkChannel(channel)} className="tab-icon-btn danger" style={{ fontSize: '11px' }}>연결 해제</button>
+                        )}
+                      </div>
+
+                      {candidates.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-3)', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name={`link-${channel}`}
+                              checked={!selected}
+                              onChange={() => setSelectedCandidates(prev => ({ ...prev, [channel]: null }))}
+                            />
+                            선택 안함
+                          </label>
+                          {candidates.map((c) => (
+                            <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface-2)', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name={`link-${channel}`}
+                                checked={!!selected && String(selected.id) === String(c.id)}
+                                onChange={() => setSelectedCandidates(prev => ({ ...prev, [channel]: { id: c.id, name: c.name } }))}
+                              />
+                              <span style={{ fontSize: '13px', color: 'var(--text)' }}>{c.name}</span>
+                              {linked && String(linked.id) === String(c.id) && (
+                                <span style={{ fontSize: '10px', color: 'var(--success)', fontWeight: 700 }}>✓ 연결됨</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+                          {linkCandidates === null ? '검색 버튼을 눌러 후보를 찾아보세요.' : '검색된 후보가 없습니다.'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {!linkLoading && (
+              <div style={{ flexShrink: 0, padding: '14px 20px', borderTop: '1px solid var(--border)' }}>
+                {console.log('[DEBUG] 렌더 시점 - 버튼 disabled:', isConnecting || Object.values(selectedCandidates).every(v => !v), '/ isConnecting:', isConnecting, '/ selectedCandidates:', selectedCandidates)}
+                <button
+                  onClick={handleConnectSelected}
+                  disabled={isConnecting || Object.values(selectedCandidates).every(v => !v)}
+                  className="tab-cta-btn"
+                  style={{ width: '100%', justifyContent: 'center', background: 'var(--accent)', opacity: isConnecting ? 0.6 : 1 }}
+                >
+                  {isConnecting ? '연결 중...' : '선택한 채널들 한번에 연결'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {priceChanges !== null && (
+        <div
+          onClick={closePriceChangeModal}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', width: '100%', maxWidth: '640px', maxHeight: '80vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          >
+            <div style={{ flexShrink: 0, padding: '20px 20px 14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>💰</Emoji> 채널 가격 변경 미리보기</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-3)' }}>
+                  {priceSyncResults ? '반영 결과' : `채널 연결된 상품 ${priceChanges.length}건의 판매가가 바뀌었습니다.`}
+                </p>
+              </div>
+              <button onClick={closePriceChangeModal} className="tab-icon-btn"><Emoji>✕</Emoji></button>
+            </div>
+
+            {!priceSyncResults && (
+              <div style={{ flexShrink: 0, padding: '0 20px 10px 20px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={handleToggleSelectAllPriceChanges} className="tab-icon-btn">
+                  {priceChanges.every((_, idx) => priceChangeSelected[idx]) ? '전체 해제' : '전체 선택'}
+                </button>
+              </div>
+            )}
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px 14px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {priceSyncResults ? (
+                priceSyncResults.map((r, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex', flexDirection: 'column', gap: '2px', background: 'var(--surface-2)', borderRadius: '8px', padding: '10px 12px',
+                      border: `1px solid ${r.success ? 'color-mix(in srgb, var(--success) 35%, transparent)' : 'color-mix(in srgb, var(--danger) 35%, transparent)'}`
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--text)', fontWeight: 700 }}>{r.product_name} · {CHANNEL_LABELS[r.channel] || r.channel}</span>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: r.success ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>{r.success ? '✓ 성공' : '✕ 실패'}</span>
+                    </div>
+                    {!r.success && r.message && (
+                      <span style={{ fontSize: '12px', color: 'var(--danger)' }}>{r.message}</span>
+                    )}
+                  </div>
+                ))
+              ) : (
+                priceChanges.map((c, idx) => (
+                  <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface-2)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!priceChangeSelected[idx]}
+                      onChange={() => setPriceChangeSelected(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                    />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: '13px', color: 'var(--text)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>{CHANNEL_LABELS[c.channel] || c.channel} - </span>
+                      {c.product_name}
+                      {c.option_name && <span style={{ fontWeight: 400, color: 'var(--text-3)' }}> {c.option_name} 옵션</span>}
+                    </div>
+                    <div style={{ fontSize: '13px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ color: 'var(--text-3)' }}>
+                        {c.old_price === null || c.old_price === undefined ? '신규' : `${c.old_price.toLocaleString()}원`}
+                      </span>
+                      <span style={{ color: 'var(--text-3)' }}>→</span>
+                      <input
+                        type="number"
+                        value={c.new_price}
+                        disabled={!priceChangeSelected[idx]}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => handleNewPriceInputChange(idx, e.target.value)}
+                        style={{
+                          width: '90px', padding: '4px 6px', borderRadius: '6px', textAlign: 'right',
+                          border: '1px solid var(--border)', background: 'var(--surface)',
+                          fontSize: '13px', fontWeight: 700,
+                          opacity: priceChangeSelected[idx] ? 1 : 0.5,
+                          color: c.old_price != null && c.new_price > c.old_price ? 'var(--success)'
+                            : c.old_price != null && c.new_price < c.old_price ? 'var(--danger)' : 'var(--text)',
+                        }}
+                      />
+                      <span style={{ color: 'var(--text-3)' }}>원</span>
+                    </div>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '10px' }}>
+              {priceSyncResults ? (
+                <button onClick={closePriceChangeModal} className="tab-cta-btn" style={{ width: '100%', justifyContent: 'center', background: 'var(--accent)' }}>닫기</button>
+              ) : (
+                <>
+                  <button onClick={closePriceChangeModal} className="tab-icon-btn" style={{ flexShrink: 0 }}>취소</button>
+                  <button
+                    onClick={handleSyncPrices}
+                    disabled={isSyncingPrices || Object.values(priceChangeSelected).every(v => !v)}
+                    className="tab-cta-btn"
+                    style={{ flex: 1, justifyContent: 'center', background: 'var(--accent)', opacity: isSyncingPrices ? 0.6 : 1 }}
+                  >
+                    {isSyncingPrices ? '반영 중...' : '선택한 항목 채널에 반영'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
