@@ -132,7 +132,7 @@ export default function MarginTab() {
         .then(data => {
           if (latestOptionRequestRef.current.naver !== candidateId) return; // 더 최신 후보 선택으로 대체된 응답은 무시
           const combos = data.status === 'success'
-            ? ((data.data?.originProduct?.optionInfo?.optionCombinations) || [])
+            ? ((data.data?.originProduct?.detailAttribute?.optionInfo?.optionCombinations) || [])
             : [];
           setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: combos.map(c => ({ id: String(c.id), name: c.optionName1 })) } }));
         })
