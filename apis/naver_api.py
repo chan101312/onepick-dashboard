@@ -385,8 +385,11 @@ def update_naver_option_prices(channel_product_no, option_updates):
     if origin.get("images"):
         update_payload["images"] = origin["images"]
 
+    # 실제 PUT으로 확인됨(2026-08-27): 필드를 최상위에 바로 보내면 네이버가
+    # "originProduct 항목을 입력해 주세요"로 거부한다 — GET 응답과 대칭으로
+    # {"originProduct": {...}} 안에 감싸서 보내야 한다.
     try:
-        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json={"originProduct": update_payload})
     except Exception as e:
         put_err_msg = f"PUT 에러: {e}"
         for r in results:
@@ -446,8 +449,11 @@ def update_naver_sale_price(channel_product_no, new_price):
     # (실제 GET으로 확인, 2026-08-27) 위의 "detailAttribute": origin.get("detailAttribute", {})가
     # 이미 옵션 정보까지 그대로 통째로 실어 보낸다 — 별도로 다시 넣을 필요 없음.
 
+    # 실제 PUT으로 확인됨(2026-08-27): 필드를 최상위에 바로 보내면 네이버가
+    # "originProduct 항목을 입력해 주세요"로 거부한다 — GET 응답과 대칭으로
+    # {"originProduct": {...}} 안에 감싸서 보내야 한다.
     try:
-        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+        put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json={"originProduct": update_payload})
     except Exception as e:
         return False, f"PUT 에러: {e}"
 

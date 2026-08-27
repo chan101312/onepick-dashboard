@@ -106,7 +106,8 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
 
         put_call = mock_request.call_args_list[1]
         self.assertEqual(put_call.args[0], "PUT")
-        sent_payload = put_call.kwargs["json"]
+        self.assertIn("originProduct", put_call.kwargs["json"])  # GET 응답과 대칭으로 감싸서 보내야 함
+        sent_payload = put_call.kwargs["json"]["originProduct"]
         sent_option_info = sent_payload["detailAttribute"]["optionInfo"]
         combos_by_id = {c["id"]: c for c in sent_option_info["optionCombinations"]}
         self.assertEqual(combos_by_id[111]["price"], 5100 - 5000)
@@ -149,7 +150,7 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
 
         # 건드리지 않은 형제 조합(222)의 가격이 원래대로 유지되는지 확인 (in-place 변경이 제대로 된 증거)
         put_call = mock_request.call_args_list[1]
-        sent_payload = put_call.kwargs["json"]
+        sent_payload = put_call.kwargs["json"]["originProduct"]
         combos_by_id = {c["id"]: c for c in sent_payload["detailAttribute"]["optionInfo"]["optionCombinations"]}
         self.assertEqual(combos_by_id[222]["price"], 300)  # 원본 그대로
 
@@ -281,7 +282,8 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
 
         self.assertTrue(ok)
         put_call = mock_request.call_args_list[1]
-        self.assertEqual(put_call.kwargs["json"]["salePrice"], 6000)
+        self.assertIn("originProduct", put_call.kwargs["json"])  # GET 응답과 대칭으로 감싸서 보내야 함
+        self.assertEqual(put_call.kwargs["json"]["originProduct"]["salePrice"], 6000)
 
     @patch.object(naver_api, "get_my_products")
     @patch.object(naver_api, "get_access_token", return_value="tok")
@@ -334,7 +336,7 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
 
         self.assertTrue(ok)
         put_call = mock_request.call_args_list[1]
-        sent_payload = put_call.kwargs["json"]
+        sent_payload = put_call.kwargs["json"]["originProduct"]
         self.assertIn("optionInfo", sent_payload["detailAttribute"])
         self.assertEqual(sent_payload["detailAttribute"]["optionInfo"]["optionCombinations"][0]["id"], 111)
 
