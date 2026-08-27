@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '../apiBase';
 import { Emoji, EmojiText } from './Icons';
 import Pagination from './Pagination';
@@ -50,6 +50,7 @@ export default function MarginTab() {
   const [searchKeyword, setSearchKeyword] = useState(""); // 모달 검색창의 현재 입력값
   const [optionCandidates, setOptionCandidates] = useState({}); // { naver: {loading, options:[{id,name}]}, coupang: {...} }
   const [selectedOptionByChannel, setSelectedOptionByChannel] = useState({}); // { naver: {id,name}|null, coupang: {...} }
+  const latestOptionRequestRef = useRef({}); // { naver: candidateId, coupang: candidateId } - 최신 요청만 반영하기 위한 레퍼런스
 
   // 💰 원가 저장 시 채널 가격 변경 미리보기
   const [priceChanges, setPriceChanges] = useState(null); // null이면 모달 닫힘, 배열이면 열림
@@ -124,21 +125,28 @@ export default function MarginTab() {
 
   const fetchOptionCandidates = (channel, candidateId) => {
     if (channel === 'naver') {
+      latestOptionRequestRef.current.naver = candidateId;
       setOptionCandidates(prev => ({ ...prev, naver: { loading: true, options: [] } }));
       fetch(`${API_BASE}/api/naver/products/${encodeURIComponent(candidateId)}`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
         .then(res => res.json())
         .then(data => {
+          if (latestOptionRequestRef.current.naver !== candidateId) return; // 더 최신 후보 선택으로 대체된 응답은 무시
           const combos = data.status === 'success'
             ? ((data.data?.originProduct?.optionInfo?.optionCombinations) || [])
             : [];
           setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: combos.map(c => ({ id: String(c.id), name: c.optionName1 })) } }));
         })
-        .catch(() => setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: [] } })));
+        .catch(() => {
+          if (latestOptionRequestRef.current.naver !== candidateId) return;
+          setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: [] } }));
+        });
     } else if (channel === 'coupang') {
+      latestOptionRequestRef.current.coupang = candidateId;
       setOptionCandidates(prev => ({ ...prev, coupang: { loading: true, options: [] } }));
       fetch(`${API_BASE}/api/coupang/products/${encodeURIComponent(candidateId)}`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
         .then(res => res.json())
         .then(data => {
+          if (latestOptionRequestRef.current.coupang !== candidateId) return; // 더 최신 후보 선택으로 대체된 응답은 무시
           const items = data.status === 'success' ? ((data.data?.items) || []) : [];
           const options = items.map(it => ({ id: String(it.vendorItemId), name: it.itemName || it.externalVendorSku || String(it.vendorItemId) }));
           setOptionCandidates(prev => ({ ...prev, coupang: { loading: false, options } }));
@@ -147,7 +155,10 @@ export default function MarginTab() {
             setSelectedOptionByChannel(prev => ({ ...prev, coupang: options[0] }));
           }
         })
-        .catch(() => setOptionCandidates(prev => ({ ...prev, coupang: { loading: false, options: [] } })));
+        .catch(() => {
+          if (latestOptionRequestRef.current.coupang !== candidateId) return;
+          setOptionCandidates(prev => ({ ...prev, coupang: { loading: false, options: [] } }));
+        });
     }
   };
 
