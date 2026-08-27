@@ -1972,6 +1972,9 @@ class ChannelLinkIn(BaseModel):
     channel: str
     channel_id: str
     channel_name: str
+    option_id: str | None = None
+    option_name: str | None = None
+    vendor_item_id: str | None = None
 
 
 @app.post("/api/channel-link")
@@ -1984,13 +1987,21 @@ def create_channel_link(payload: ChannelLinkIn):
     import datetime
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    entry = {
+        "id": payload.channel_id,
+        "name": payload.channel_name,
+        "linked_at": now_str,
+    }
+    if payload.option_id:
+        entry["option_id"] = payload.option_id
+    if payload.option_name:
+        entry["option_name"] = payload.option_name
+    if payload.vendor_item_id:
+        entry["vendor_item_id"] = payload.vendor_item_id
+
     with _channel_link_lock:
         data = _load_json_file(CHANNEL_LINK_FILE, {})
-        data.setdefault(product_name, {})[channel] = {
-            "id": payload.channel_id,
-            "name": payload.channel_name,
-            "linked_at": now_str,
-        }
+        data.setdefault(product_name, {})[channel] = entry
         _save_json_file(CHANNEL_LINK_FILE, data)
 
     return {"status": "success", "data": data[product_name]}
