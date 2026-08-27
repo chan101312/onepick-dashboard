@@ -328,7 +328,11 @@ def update_naver_option_prices(channel_product_no, option_updates):
     origin = data.get("originProduct", {}) or {}
     origin_no = origin.get("originProductNo")
     sale_price = origin.get("salePrice")
-    option_info = origin.get("optionInfo") or {}
+    # 실제 GET 응답으로 확인됨(2026-08-27): optionInfo는 originProduct 최상위가 아니라
+    # originProduct.detailAttribute.optionInfo에 들어있다. 최상위에서 읽으면 항상 {}가 되어
+    # 옵션 상품인데도 "옵션을 찾을 수 없습니다"로 실패한다 — 실 상품 GET으로 발견/수정.
+    detail_attr = origin.get("detailAttribute", {}) or {}
+    option_info = detail_attr.get("optionInfo") or {}
     combinations = option_info.get("optionCombinations") or []
 
     if not origin_no or sale_price is None or not combinations:
@@ -353,15 +357,17 @@ def update_naver_option_prices(channel_product_no, option_updates):
     # 이 가정이 맞는지는 문서로 확증 못 했고, 실제 PUT 테스트로 검증해야 한다(계획 마지막 태스크).
     option_info["optionCombinations"] = combinations
     option_info.pop("optionCombinationSortType", None)
+    # optionInfo를 읽어온 그 자리(detailAttribute 안)에 그대로 되돌려 넣는다 — GET/PUT 위치를 맞춰야
+    # 네이버가 이 옵션 정보를 실제로 인식한다.
+    detail_attr["optionInfo"] = option_info
 
     update_payload = {
         "name": origin.get("name"),
         "salePrice": int(sale_price),
         "stockQuantity": origin.get("stockQuantity"),
         "detailContent": origin.get("detailContent", " "),
-        "detailAttribute": origin.get("detailAttribute", {}),
+        "detailAttribute": detail_attr,
         "deliveryInfo": origin.get("deliveryInfo", {}),
-        "optionInfo": option_info,
     }
     if origin.get("leafCategoryId"):
         update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
@@ -425,8 +431,9 @@ def update_naver_sale_price(channel_product_no, new_price):
         update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
     if origin.get("images"):
         update_payload["images"] = origin["images"]
-    if origin.get("optionInfo"):
-        update_payload["optionInfo"] = origin["optionInfo"]
+    # 옵션 정보는 optionInfo가 originProduct 최상위가 아니라 detailAttribute.optionInfo에 있어서
+    # (실제 GET으로 확인, 2026-08-27) 위의 "detailAttribute": origin.get("detailAttribute", {})가
+    # 이미 옵션 정보까지 그대로 통째로 실어 보낸다 — 별도로 다시 넣을 필요 없음.
 
     try:
         put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)

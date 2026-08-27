@@ -52,15 +52,16 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
                 "salePrice": 5000,
                 "stockQuantity": 10,
                 "detailContent": "내용",
-                "detailAttribute": {},
-                "deliveryInfo": {},
-                "optionInfo": {
-                    "optionCombinationSortType": "CREATE",
-                    "optionCombinations": [
-                        {"id": 111, "optionName1": "30g", "price": 0},
-                        {"id": 222, "optionName1": "50g", "price": 300},
-                    ]
+                "detailAttribute": {
+                    "optionInfo": {
+                        "optionCombinationSortType": "CREATE",
+                        "optionCombinations": [
+                            {"id": 111, "optionName1": "30g", "price": 0},
+                            {"id": 222, "optionName1": "50g", "price": 300},
+                        ]
+                    },
                 },
+                "deliveryInfo": {},
             }
         }
         return res
@@ -84,11 +85,12 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
         put_call = mock_request.call_args_list[1]
         self.assertEqual(put_call.args[0], "PUT")
         sent_payload = put_call.kwargs["json"]
-        combos_by_id = {c["id"]: c for c in sent_payload["optionInfo"]["optionCombinations"]}
+        sent_option_info = sent_payload["detailAttribute"]["optionInfo"]
+        combos_by_id = {c["id"]: c for c in sent_option_info["optionCombinations"]}
         self.assertEqual(combos_by_id[111]["price"], 5100 - 5000)
         self.assertEqual(combos_by_id[222]["price"], 5400 - 5000)
         # optionCombinationSortType이 제거되었는지 확인 (id 변경 위험 방지)
-        self.assertNotIn("optionCombinationSortType", sent_payload["optionInfo"])
+        self.assertNotIn("optionCombinationSortType", sent_option_info)
 
     @patch.object(naver_api, "get_access_token", return_value="tok")
     @patch.object(naver_api, "_request")
@@ -126,7 +128,7 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
         # 건드리지 않은 형제 조합(222)의 가격이 원래대로 유지되는지 확인 (in-place 변경이 제대로 된 증거)
         put_call = mock_request.call_args_list[1]
         sent_payload = put_call.kwargs["json"]
-        combos_by_id = {c["id"]: c for c in sent_payload["optionInfo"]["optionCombinations"]}
+        combos_by_id = {c["id"]: c for c in sent_payload["detailAttribute"]["optionInfo"]["optionCombinations"]}
         self.assertEqual(combos_by_id[222]["price"], 300)  # 원본 그대로
 
 
@@ -155,12 +157,15 @@ class TestUpdateNaverOptionPricesExceptionHandling(unittest.TestCase):
         get_res.json.return_value = {
             "originProduct": {
                 "originProductNo": "9999", "name": "테스트상품", "salePrice": 5000,
-                "stockQuantity": 10, "detailContent": "내용", "detailAttribute": {},
-                "deliveryInfo": {}, "optionInfo": {
-                    "optionCombinations": [
-                        {"id": 111, "optionName1": "30g", "price": 0},
-                    ]
-                }
+                "stockQuantity": 10, "detailContent": "내용",
+                "detailAttribute": {
+                    "optionInfo": {
+                        "optionCombinations": [
+                            {"id": 111, "optionName1": "30g", "price": 0},
+                        ]
+                    }
+                },
+                "deliveryInfo": {},
             }
         }
         mock_request.side_effect = [get_res, Exception("PUT 네트워크 오류")]
@@ -201,13 +206,16 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
         get_res.status_code = 200
         get_res.json.return_value = {"originProduct": {
             "originProductNo": "9999", "name": "테스트상품", "salePrice": 5000,
-            "stockQuantity": 10, "detailContent": "내용", "detailAttribute": {}, "deliveryInfo": {},
-            "optionInfo": {
-                "optionCombinationSortType": "CREATE",
-                "optionCombinations": [
-                    {"id": 111, "optionName1": "30g", "price": 0},
-                ]
-            }
+            "stockQuantity": 10, "detailContent": "내용",
+            "detailAttribute": {
+                "optionInfo": {
+                    "optionCombinationSortType": "CREATE",
+                    "optionCombinations": [
+                        {"id": 111, "optionName1": "30g", "price": 0},
+                    ]
+                }
+            },
+            "deliveryInfo": {},
         }}
         put_res = MagicMock()
         put_res.status_code = 200
@@ -218,8 +226,8 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
         self.assertTrue(ok)
         put_call = mock_request.call_args_list[1]
         sent_payload = put_call.kwargs["json"]
-        self.assertIn("optionInfo", sent_payload)
-        self.assertEqual(sent_payload["optionInfo"]["optionCombinations"][0]["id"], 111)
+        self.assertIn("optionInfo", sent_payload["detailAttribute"])
+        self.assertEqual(sent_payload["detailAttribute"]["optionInfo"]["optionCombinations"][0]["id"], 111)
 
     @patch.object(naver_api, "get_access_token", return_value="tok")
     @patch.object(naver_api, "_request")
