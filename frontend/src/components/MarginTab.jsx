@@ -468,6 +468,9 @@ export default function MarginTab() {
             channel: c.channel,
             channel_id: c.channel_id,
             channel_name: c.channel_name,
+            option_id: c.option_id,
+            option_name: c.option_name,
+            vendor_item_id: c.vendor_item_id,
             new_price: c.new_price
           }))
         })
@@ -1205,7 +1208,9 @@ export default function MarginTab() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '13px', color: 'var(--text)', fontWeight: 700 }}>{r.product_name} · {CHANNEL_LABELS[r.channel] || r.channel}</span>
+                      <span style={{ fontSize: '13px', color: 'var(--text)', fontWeight: 700 }}>
+                        {CHANNEL_LABELS[r.channel] || r.channel} - {r.product_name}{r.option_name ? ` ${r.option_name} 옵션` : ''}
+                      </span>
                       <span style={{ fontSize: '12px', fontWeight: 700, color: r.success ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>{r.success ? '✓ 성공' : '✕ 실패'}</span>
                     </div>
                     {!r.success && r.message && (
