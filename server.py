@@ -1825,3 +1825,118 @@ def get_orders_with_stock_logic():
             order['can_ship'] = "🔴 재고부족"
 
     return orders
+
+
+# ==========================================
+# 🔗 마진산출장부 상품 ↔ 채널(쿠팡/네이버/식봄) 연결
+# 마진산출장부의 "온라인 상품명"은 자유 텍스트라 채널 API의 실제 상품과 자동으로 안 이어져서,
+# 상품명으로 채널별 후보를 검색해 보여주고 사람이 고른 걸 영구히 저장한다.
+# 후보 검색은 order_reconcile에서 이미 쓰는 _tokenize_product_name/_token_match_score를 재사용한다.
+# ==========================================
+CHANNEL_LINK_FILE = "channel_link.json"
+_channel_link_lock = Lock()
+CHANNEL_LINK_CHANNELS = ("coupang", "naver", "sikbom")
+
+
+def _search_channel_candidates(product_name, products, name_key, id_key, limit=5):
+    """products(채널 상품 리스트)를 product_name과 토큰 매칭 점수로 정렬해 상위 후보만 반환한다."""
+    tokens_a = _tokenize_product_name(product_name)
+    scored = []
+    for p in products:
+        name = str(p.get(name_key, "")).strip()
+        if not name:
+            continue
+        _, score = _token_match_score(tokens_a, _tokenize_product_name(name))
+        if score > 0:
+            scored.append((score, {"id": p.get(id_key), "name": name}))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [c for _, c in scored[:limit]]
+
+
+@app.get("/api/channel-link/search")
+def search_channel_link(product_name: str = Query(...)):
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return {"status": "error", "message": "product_name은 비어있으면 안 됩니다."}
+
+    candidates = {}
+
+    try:
+        candidates["coupang"] = _search_channel_candidates(
+            product_name, coupang_api.get_coupang_products(), "sellerProductName", "sellerProductId"
+        )
+    except Exception as e:
+        print(f"[채널연결] 쿠팡 상품 검색 실패: {e}")
+        candidates["coupang"] = []
+
+    try:
+        candidates["naver"] = _search_channel_candidates(
+            product_name, naver_api.get_my_products(), "name", "channelProductNo"
+        )
+    except Exception as e:
+        print(f"[채널연결] 네이버 상품 검색 실패: {e}")
+        candidates["naver"] = []
+
+    try:
+        stock_by_name = sikbom_api.get_sikbom_stock_by_product_name()
+        sikbom_products = [{"id": name, "name": name} for name in stock_by_name.keys()]
+        candidates["sikbom"] = _search_channel_candidates(product_name, sikbom_products, "name", "id")
+    except NotImplementedError:
+        candidates["sikbom"] = []  # 식봄 공식 API 미연동 — apis/sikbom_api.py 참고
+    except Exception as e:
+        print(f"[채널연결] 식봄 상품 검색 실패: {e}")
+        candidates["sikbom"] = []
+
+    return {"status": "success", "keyword_used": product_name, "candidates": candidates}
+
+
+class ChannelLinkIn(BaseModel):
+    product_name: str
+    channel: str
+    channel_id: str
+    channel_name: str
+
+
+@app.post("/api/channel-link")
+def create_channel_link(payload: ChannelLinkIn):
+    product_name = payload.product_name.strip()
+    channel = payload.channel.strip()
+    if not product_name or channel not in CHANNEL_LINK_CHANNELS:
+        return {"status": "error", "message": f"product_name이 비어있거나 channel이 {CHANNEL_LINK_CHANNELS} 중 하나가 아닙니다."}
+
+    import datetime
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with _channel_link_lock:
+        data = _load_json_file(CHANNEL_LINK_FILE, {})
+        data.setdefault(product_name, {})[channel] = {
+            "id": payload.channel_id,
+            "name": payload.channel_name,
+            "linked_at": now_str,
+        }
+        _save_json_file(CHANNEL_LINK_FILE, data)
+
+    return {"status": "success", "data": data[product_name]}
+
+
+@app.get("/api/channel-link")
+def get_channel_links():
+    data = _load_json_file(CHANNEL_LINK_FILE, {})
+    return {"status": "success", "data": data}
+
+
+@app.delete("/api/channel-link/{channel}")
+def delete_channel_link(channel: str, product_name: str = Query(...)):
+    # 💡 product_name을 경로가 아닌 쿼리 파라미터로 받는다: 상품명에 "/"가 있으면(예: "31/40")
+    # 퍼센트 인코딩(%2F)해도 ASGI 라우팅이 매칭 전에 %2F를 실제 "/"로 되돌려 경로 세그먼트가 어긋나 404가 난다.
+    with _channel_link_lock:
+        data = _load_json_file(CHANNEL_LINK_FILE, {})
+        entry = data.get(product_name)
+        if not entry or channel not in entry:
+            return {"status": "error", "message": "연결된 정보가 없습니다."}
+        del entry[channel]
+        if not entry:
+            del data[product_name]
+        _save_json_file(CHANNEL_LINK_FILE, data)
+
+    return {"status": "success"}
