@@ -276,6 +276,19 @@ def get_naver_product_detail(channel_product_no):
     except Exception as e: print(f"조회 에러: {e}")
     return None
 
+def _match_option_combination(combinations, option_id, option_name):
+    """optionCombinations 리스트에서 대상 옵션을 찾는다.
+    1순위: option_id와 combo['id']가 일치. 2순위(폴백): option_name과 combo['optionName1']이 일치.
+    id가 PUT 이후에도 유지되는지 문서로 확증 안 돼서, id가 안 맞을 가능성에 대비한 폴백이다."""
+    requested_id = str(option_id) if option_id else None
+    if requested_id:
+        found = next((c for c in combinations if str(c.get("id")) == requested_id), None)
+        if found is not None:
+            return found
+    if option_name:
+        return next((c for c in combinations if str(c.get("optionName1")) == str(option_name)), None)
+    return None
+
 # ==========================================
 # 📦 재고 정합성 체크용 — 상품명별 재고 조회
 # ==========================================
