@@ -372,22 +372,13 @@ def update_naver_option_prices(channel_product_no, option_updates):
     # 네이버가 이 옵션 정보를 실제로 인식한다.
     detail_attr["optionInfo"] = option_info
 
-    update_payload = {
-        "name": origin.get("name"),
-        "salePrice": int(sale_price),
-        "stockQuantity": origin.get("stockQuantity"),
-        "detailContent": origin.get("detailContent", " "),
-        "detailAttribute": detail_attr,
-        "deliveryInfo": origin.get("deliveryInfo", {}),
-    }
-    if origin.get("leafCategoryId"):
-        update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
-    if origin.get("images"):
-        update_payload["images"] = origin["images"]
+    # 실제 PUT으로 확인됨(2026-08-27): salePrice/detailAttribute 등 몇 개만 골라서 보내면
+    # "originProduct.statusType — Enum값을 입력하지 않았습니다"처럼 우리가 안 넣은 다른
+    # 필수 필드 때문에 거부당한다. GET으로 받은 origin 전체를 그대로 되돌려 보내고,
+    # detailAttribute(옵션 가격 포함)만 위에서 이미 in-place로 바꿔둔 값을 쓴다.
+    update_payload = dict(origin)
+    update_payload["detailAttribute"] = detail_attr
 
-    # 실제 PUT으로 확인됨(2026-08-27): 필드를 최상위에 바로 보내면 네이버가
-    # "originProduct 항목을 입력해 주세요"로 거부한다 — GET 응답과 대칭으로
-    # {"originProduct": {...}} 안에 감싸서 보내야 한다.
     try:
         put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json={"originProduct": update_payload})
     except Exception as e:
@@ -433,25 +424,12 @@ def update_naver_sale_price(channel_product_no, new_price):
     if not origin_no:
         return False, "originProductNo 정보를 찾을 수 없습니다."
 
-    update_payload = {
-        "name": origin.get("name"),
-        "salePrice": int(new_price),
-        "stockQuantity": origin.get("stockQuantity"),
-        "detailContent": origin.get("detailContent", " "),
-        "detailAttribute": origin.get("detailAttribute", {}),
-        "deliveryInfo": origin.get("deliveryInfo", {}),
-    }
-    if origin.get("leafCategoryId"):
-        update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
-    if origin.get("images"):
-        update_payload["images"] = origin["images"]
-    # 옵션 정보는 optionInfo가 originProduct 최상위가 아니라 detailAttribute.optionInfo에 있어서
-    # (실제 GET으로 확인, 2026-08-27) 위의 "detailAttribute": origin.get("detailAttribute", {})가
-    # 이미 옵션 정보까지 그대로 통째로 실어 보낸다 — 별도로 다시 넣을 필요 없음.
-
-    # 실제 PUT으로 확인됨(2026-08-27): 필드를 최상위에 바로 보내면 네이버가
-    # "originProduct 항목을 입력해 주세요"로 거부한다 — GET 응답과 대칭으로
-    # {"originProduct": {...}} 안에 감싸서 보내야 한다.
+    # 실제 PUT으로 확인됨(2026-08-27): salePrice 등 몇 개만 골라서 보내면
+    # "originProduct.statusType — Enum값을 입력하지 않았습니다"처럼 우리가 안 넣은 다른
+    # 필수 필드 때문에 거부당한다. GET으로 받은 origin 전체를 그대로 되돌려 보내고
+    # salePrice(대표가격)만 바꾼다 — optionInfo 등 나머지 필드는 origin 그대로라 손상 없음.
+    update_payload = dict(origin)
+    update_payload["salePrice"] = int(new_price)
     try:
         put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json={"originProduct": update_payload})
     except Exception as e:

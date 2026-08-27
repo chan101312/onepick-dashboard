@@ -70,6 +70,8 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
         res.json.return_value = {
             "originProduct": {
                 "originProductNo": "9999",
+                "statusType": "SALE",
+                "saleType": "NEW",
                 "name": "테스트상품",
                 "salePrice": 5000,
                 "stockQuantity": 10,
@@ -84,6 +86,7 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
                     },
                 },
                 "deliveryInfo": {},
+                "customerBenefit": {"immediateDiscountPolicy": None},
             }
         }
         return res
@@ -114,6 +117,11 @@ class TestUpdateNaverOptionPrices(unittest.TestCase):
         self.assertEqual(combos_by_id[222]["price"], 5400 - 5000)
         # optionCombinationSortType이 제거되었는지 확인 (id 변경 위험 방지)
         self.assertNotIn("optionCombinationSortType", sent_option_info)
+        # GET으로 받은 origin 전체를 그대로 되돌려 보내는지 확인 (statusType 등 필수 필드 누락 시
+        # 네이버가 "Enum값을 입력하지 않았습니다"로 거부하는 걸 실제 PUT으로 확인해서 고친 부분)
+        self.assertEqual(sent_payload["statusType"], "SALE")
+        self.assertEqual(sent_payload["saleType"], "NEW")
+        self.assertIn("customerBenefit", sent_payload)
 
     @patch.object(naver_api, "get_access_token", return_value="tok")
     @patch.object(naver_api, "_request")
@@ -271,7 +279,7 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
         get_res = MagicMock()
         get_res.status_code = 200
         get_res.json.return_value = {"originProduct": {
-            "originProductNo": "9999", "name": "테스트상품", "salePrice": 5000,
+            "originProductNo": "9999", "statusType": "SALE", "name": "테스트상품", "salePrice": 5000,
             "stockQuantity": 10, "detailContent": "내용", "detailAttribute": {}, "deliveryInfo": {},
         }}
         put_res = MagicMock()
@@ -283,7 +291,10 @@ class TestUpdateNaverSalePrice(unittest.TestCase):
         self.assertTrue(ok)
         put_call = mock_request.call_args_list[1]
         self.assertIn("originProduct", put_call.kwargs["json"])  # GET 응답과 대칭으로 감싸서 보내야 함
-        self.assertEqual(put_call.kwargs["json"]["originProduct"]["salePrice"], 6000)
+        sent_payload = put_call.kwargs["json"]["originProduct"]
+        self.assertEqual(sent_payload["salePrice"], 6000)
+        # GET으로 받은 origin 전체를 그대로 되돌려 보내는지 확인 (statusType 등 누락 시 네이버가 거부)
+        self.assertEqual(sent_payload["statusType"], "SALE")
 
     @patch.object(naver_api, "get_my_products")
     @patch.object(naver_api, "get_access_token", return_value="tok")
