@@ -289,6 +289,125 @@ def _match_option_combination(combinations, option_id, option_name):
         return next((c for c in combinations if str(c.get("optionName1")) == str(option_name)), None)
     return None
 
+
+def update_naver_option_prices(channel_product_no, option_updates):
+    """같은 상품(channel_product_no)의 여러 옵션 가격을 GET 1회 + PUT 1회로 한번에 갱신한다.
+    옵션마다 따로 GET→PUT 하면 뒤의 PUT이 앞의 PUT을 못 보고 덮어써서 유실될 수 있어 반드시 배치로 처리한다.
+    option_updates: [{"option_id": str|None, "option_name": str|None, "new_price": int(목표 절대가)}, ...]
+    반환: [{"option_id", "option_name", "success", "message", "matched_option_id"}, ...] (요청 순서 유지)
+    """
+    def fail_all(message):
+        return [{"option_id": u.get("option_id"), "option_name": u.get("option_name"),
+                  "success": False, "message": message, "matched_option_id": None} for u in option_updates]
+
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return fail_all(f"인증에러: {e}")
+    if not token:
+        return fail_all("토큰 실패")
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
+    res = _request("GET", url, headers=headers)
+    if res.status_code != 200:
+        return fail_all(f"조회실패: {res.text[:200]}")
+
+    data = res.json()
+    origin = data.get("originProduct", {}) or {}
+    origin_no = origin.get("originProductNo")
+    sale_price = origin.get("salePrice")
+    option_info = origin.get("optionInfo") or {}
+    combinations = option_info.get("optionCombinations") or []
+
+    if not origin_no or sale_price is None or not combinations:
+        return fail_all("originProductNo/salePrice/optionCombinations 정보를 찾을 수 없습니다.")
+
+    results = []
+    for update in option_updates:
+        target = _match_option_combination(combinations, update.get("option_id"), update.get("option_name"))
+        if target is None:
+            results.append({"option_id": update.get("option_id"), "option_name": update.get("option_name"),
+                             "success": False, "message": "옵션을 찾을 수 없음(id/이름 모두 불일치)", "matched_option_id": None})
+            continue
+        target["price"] = int(update["new_price"]) - int(sale_price)
+        results.append({"option_id": update.get("option_id"), "option_name": update.get("option_name"),
+                         "success": True, "message": "PUT 대기", "matched_option_id": target.get("id")})
+
+    if not any(r["success"] for r in results):
+        return results
+
+    # id 필드를 그대로 유지한 채 price만 바꿔서 되돌려 보낸다.
+    # optionCombinationSortType(예: "CREATE")을 쓰면 전체가 새로 생성되며 id가 바뀔 위험이 있어 일부러 안 보낸다 —
+    # 이 가정이 맞는지는 문서로 확증 못 했고, 실제 PUT 테스트로 검증해야 한다(계획 마지막 태스크).
+    option_info["optionCombinations"] = combinations
+    option_info.pop("optionCombinationSortType", None)
+
+    update_payload = {
+        "name": origin.get("name"),
+        "salePrice": int(sale_price),
+        "stockQuantity": origin.get("stockQuantity"),
+        "detailContent": origin.get("detailContent", " "),
+        "detailAttribute": origin.get("detailAttribute", {}),
+        "deliveryInfo": origin.get("deliveryInfo", {}),
+        "optionInfo": option_info,
+    }
+    if origin.get("leafCategoryId"):
+        update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
+    if origin.get("images"):
+        update_payload["images"] = origin["images"]
+
+    put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    put_ok = put_res.status_code == 200
+    put_msg = "성공" if put_ok else f"네이버 거부: {put_res.text[:300]}"
+    for r in results:
+        if r["success"]:
+            r["success"] = put_ok
+            r["message"] = put_msg
+    return results
+
+
+def update_naver_sale_price(channel_product_no, new_price):
+    """옵션 없는 네이버 상품의 대표가격(salePrice)만 갱신한다."""
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return False, f"인증에러: {e}"
+    if not token:
+        return False, "토큰 실패"
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{channel_product_no}"
+    res = _request("GET", url, headers=headers)
+    if res.status_code != 200:
+        return False, f"조회실패: {res.text[:200]}"
+
+    data = res.json()
+    origin = data.get("originProduct", {}) or {}
+    origin_no = origin.get("originProductNo")
+    if not origin_no:
+        return False, "originProductNo 정보를 찾을 수 없습니다."
+
+    update_payload = {
+        "name": origin.get("name"),
+        "salePrice": int(new_price),
+        "stockQuantity": origin.get("stockQuantity"),
+        "detailContent": origin.get("detailContent", " "),
+        "detailAttribute": origin.get("detailAttribute", {}),
+        "deliveryInfo": origin.get("deliveryInfo", {}),
+    }
+    if origin.get("leafCategoryId"):
+        update_payload["leafCategoryId"] = str(origin["leafCategoryId"])
+    if origin.get("images"):
+        update_payload["images"] = origin["images"]
+    if origin.get("optionInfo"):
+        update_payload["optionInfo"] = origin["optionInfo"]
+
+    put_res = _request("PUT", f"https://api.commerce.naver.com/external/v2/products/origin-products/{origin_no}", headers=headers, json=update_payload)
+    if put_res.status_code == 200:
+        return True, "성공"
+    return False, f"네이버 거부: {put_res.text[:300]}"
+
 # ==========================================
 # 📦 재고 정합성 체크용 — 상품명별 재고 조회
 # ==========================================
