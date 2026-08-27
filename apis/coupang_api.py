@@ -204,6 +204,31 @@ def get_coupang_product_detail(seller_product_id):
     return (res.json() or {}).get('data')
 
 
+def _round_price_to_10(price):
+    """쿠팡 가격변경 API는 10원 단위만 허용한다."""
+    price = float(price)
+    return int((price + 5) // 10) * 10
+
+
+def update_coupang_item_price(vendor_item_id, price):
+    """옵션(vendorItemId) 단위 판매가격 변경. 요청 바디 없음, 가격은 10원 단위로 반올림해서 보낸다."""
+    if not all([VENDOR_ID, ACCESS_KEY, SECRET_KEY]):
+        return False, "쿠팡 API 키(COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY)가 config.py에 설정되지 않았습니다."
+    if not vendor_item_id:
+        return False, "vendor_item_id가 없습니다."
+
+    rounded_price = _round_price_to_10(price)
+    uri = f"/v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/{vendor_item_id}/prices/{rounded_price}"
+    url = f"https://api-gateway.coupang.com{uri}"
+    auth_header = generate_coupang_signature("PUT", uri)
+    headers = {"Authorization": auth_header, "Content-Type": "application/json;charset=UTF-8", "Accept": "application/json"}
+
+    res = _request("PUT", url, headers=headers)
+    if res.status_code == 200:
+        return True, "성공"
+    return False, f"쿠팡 거부: HTTP {res.status_code} — {res.text[:300]}"
+
+
 def get_coupang_stock_by_product_name():
     """
     상품명별 쿠팡 '판매가능수량'(maximumBuyCount)을 조회한다. 옵션이 여러 개인 상품은 옵션별 수량을 합산한다.
