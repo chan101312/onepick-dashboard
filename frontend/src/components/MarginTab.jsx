@@ -48,6 +48,8 @@ export default function MarginTab() {
   const [selectedCandidates, setSelectedCandidates] = useState({}); // { coupang: {id,name}|null, naver: ..., sikbom: ... }
   const [isConnecting, setIsConnecting] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState(""); // 모달 검색창의 현재 입력값
+  const [optionCandidates, setOptionCandidates] = useState({}); // { naver: {loading, options:[{id,name}]}, coupang: {...} }
+  const [selectedOptionByChannel, setSelectedOptionByChannel] = useState({}); // { naver: {id,name}|null, coupang: {...} }
 
   // 💰 원가 저장 시 채널 가격 변경 미리보기
   const [priceChanges, setPriceChanges] = useState(null); // null이면 모달 닫힘, 배열이면 열림
@@ -116,6 +118,37 @@ export default function MarginTab() {
     setLinkCandidates(null);
     setSelectedCandidates({});
     setSearchKeyword("");
+    setOptionCandidates({});
+    setSelectedOptionByChannel({});
+  };
+
+  const fetchOptionCandidates = (channel, candidateId) => {
+    if (channel === 'naver') {
+      setOptionCandidates(prev => ({ ...prev, naver: { loading: true, options: [] } }));
+      fetch(`${API_BASE}/api/naver/products/${encodeURIComponent(candidateId)}`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
+        .then(res => res.json())
+        .then(data => {
+          const combos = data.status === 'success'
+            ? ((data.data?.originProduct?.optionInfo?.optionCombinations) || [])
+            : [];
+          setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: combos.map(c => ({ id: String(c.id), name: c.optionName1 })) } }));
+        })
+        .catch(() => setOptionCandidates(prev => ({ ...prev, naver: { loading: false, options: [] } })));
+    } else if (channel === 'coupang') {
+      setOptionCandidates(prev => ({ ...prev, coupang: { loading: true, options: [] } }));
+      fetch(`${API_BASE}/api/coupang/products/${encodeURIComponent(candidateId)}`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
+        .then(res => res.json())
+        .then(data => {
+          const items = data.status === 'success' ? ((data.data?.items) || []) : [];
+          const options = items.map(it => ({ id: String(it.vendorItemId), name: it.itemName || it.externalVendorSku || String(it.vendorItemId) }));
+          setOptionCandidates(prev => ({ ...prev, coupang: { loading: false, options } }));
+          // 옵션이 1개뿐이면 사용자에게 선택지를 보여줄 필요 없이 바로 그 vendorItemId를 써야 한다(쿠팡은 옵션 없어도 vendorItemId가 필수).
+          if (options.length === 1) {
+            setSelectedOptionByChannel(prev => ({ ...prev, coupang: options[0] }));
+          }
+        })
+        .catch(() => setOptionCandidates(prev => ({ ...prev, coupang: { loading: false, options: [] } })));
+    }
   };
 
   const handleConnectSelected = async () => {
@@ -136,12 +169,16 @@ export default function MarginTab() {
     setIsConnecting(true);
     for (const [channel, candidate] of entries) {
       try {
+        const chosenOption = selectedOptionByChannel[channel] || null;
         const res = await fetch(`${API_BASE}/api/channel-link`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
           body: JSON.stringify({
             product_name: linkModalProduct, channel,
-            channel_id: String(candidate.id), channel_name: candidate.name
+            channel_id: String(candidate.id), channel_name: candidate.name,
+            option_id: channel === 'naver' ? (chosenOption?.id || null) : null,
+            option_name: chosenOption?.name || null,
+            vendor_item_id: channel === 'coupang' ? (chosenOption?.id || null) : null,
           })
         });
         const data = await res.json();
@@ -1058,7 +1095,11 @@ export default function MarginTab() {
                                 type="radio"
                                 name={`link-${channel}`}
                                 checked={!!selected && String(selected.id) === String(c.id)}
-                                onChange={() => setSelectedCandidates(prev => ({ ...prev, [channel]: { id: c.id, name: c.name } }))}
+                                onChange={() => {
+                                  setSelectedCandidates(prev => ({ ...prev, [channel]: { id: c.id, name: c.name } }));
+                                  setSelectedOptionByChannel(prev => ({ ...prev, [channel]: null }));
+                                  if (channel === 'naver' || channel === 'coupang') fetchOptionCandidates(channel, c.id);
+                                }}
                               />
                               <span style={{ fontSize: '13px', color: 'var(--text)' }}>{c.name}</span>
                               {linked && String(linked.id) === String(c.id) && (
@@ -1066,6 +1107,26 @@ export default function MarginTab() {
                               )}
                             </label>
                           ))}
+                          {(channel === 'naver' || channel === 'coupang') && selected && optionCandidates[channel] && (
+                            optionCandidates[channel].loading ? (
+                              <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '4px' }}>옵션 조회 중...</div>
+                            ) : optionCandidates[channel].options.length > 0 ? (
+                              <div style={{ marginTop: '6px', paddingLeft: '12px', borderLeft: '2px solid var(--border)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '6px' }}>이 상품의 어떤 옵션인가요?</div>
+                                {optionCandidates[channel].options.map(opt => (
+                                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', padding: '4px 0', cursor: 'pointer' }}>
+                                    <input
+                                      type="radio"
+                                      name={`option-${channel}`}
+                                      checked={!!selectedOptionByChannel[channel] && selectedOptionByChannel[channel].id === opt.id}
+                                      onChange={() => setSelectedOptionByChannel(prev => ({ ...prev, [channel]: opt }))}
+                                    />
+                                    {opt.name}
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null
+                          )}
                         </div>
                       ) : (
                         <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
