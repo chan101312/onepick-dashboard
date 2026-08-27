@@ -396,11 +396,25 @@ async def update_margin(request: Request):
     global current_margin_data
     try:
         data = await request.json()
-        current_margin_data = data.get("data", [])
+        new_rows = data.get("data", [])
+
+        old_rows = []
+        if os.path.exists(MARGIN_FILE_PATH):
+            try:
+                old_df = pd.read_csv(MARGIN_FILE_PATH)
+                old_df = clean_dataframe(old_df)
+                old_rows = old_df.to_dict(orient="records")
+            except Exception as e:
+                print(f"[가격변경감지] 이전 단가표 읽기 실패(무시하고 계속): {e}")
+
+        channel_links = _load_json_file(CHANNEL_LINK_FILE, {})
+        price_changes = _compute_price_changes(old_rows, new_rows, channel_links)
+
+        current_margin_data = new_rows
         df = pd.DataFrame(current_margin_data)
-        df = clean_dataframe(df) 
+        df = clean_dataframe(df)
         df.to_csv(MARGIN_FILE_PATH, index=False, encoding='utf-8-sig')
-        return {"status": "success"}
+        return {"status": "success", "price_changes": price_changes}
     except Exception as e: return {"status": "error", "message": str(e)}
 
 # ==========================================
