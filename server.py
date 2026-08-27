@@ -2064,7 +2064,10 @@ def channel_price_sync(payload: ChannelPriceSyncIn):
             results.append({"product_name": c.product_name, "channel": c.channel, "option_name": c.option_name,
                              "success": False, "message": "vendor_item_id가 연결 정보에 없습니다. 채널연결을 다시 해주세요."})
             continue
-        ok, msg = coupang_api.update_coupang_item_price(c.vendor_item_id, c.new_price)
+        try:
+            ok, msg = coupang_api.update_coupang_item_price(c.vendor_item_id, c.new_price)
+        except Exception as e:
+            ok, msg = False, f"처리 중 오류: {e}"
         results.append({"product_name": c.product_name, "channel": c.channel, "option_name": c.option_name, "success": ok, "message": msg})
 
     # 네이버: channel_id(channelProductNo) 단위로 그룹핑해서 상품당 GET 1회 + PUT 1회로 처리한다.
@@ -2080,16 +2083,29 @@ def channel_price_sync(payload: ChannelPriceSyncIn):
 
         if with_option:
             option_updates = [{"option_id": c.option_id, "option_name": c.option_name, "new_price": c.new_price} for c in with_option]
-            option_results = naver_api.update_naver_option_prices(channel_id, option_updates)
+            try:
+                option_results = naver_api.update_naver_option_prices(channel_id, option_updates)
+            except Exception as e:
+                option_results = [{"success": False, "message": f"처리 중 오류: {e}", "matched_option_id": None} for _ in with_option]
             for c, r in zip(with_option, option_results):
                 results.append({"product_name": c.product_name, "channel": "naver", "option_name": c.option_name,
                                  "success": r["success"], "message": r["message"]})
                 if r["success"] and r.get("matched_option_id") is not None and str(r["matched_option_id"]) != str(c.option_id):
                     channel_link_id_fixes.append((c.product_name, c.option_id, str(r["matched_option_id"])))
 
-        for c in without_option:
-            ok, msg = naver_api.update_naver_sale_price(channel_id, c.new_price)
-            results.append({"product_name": c.product_name, "channel": "naver", "option_name": None, "success": ok, "message": msg})
+        # 같은 channel_id에 옵션 가격 변경 건이 있으면 대표가(salePrice)는 절대 같이 바꾸지 않는다.
+        # 옵션 가격은 salePrice 대비 delta로 저장되므로, 방금 맞춰둔 옵션 delta가 salePrice 변경으로 틀어져버린다.
+        if with_option and without_option:
+            for c in without_option:
+                results.append({"product_name": c.product_name, "channel": "naver", "option_name": None, "success": False,
+                                 "message": "같은 상품에 옵션 가격 변경과 대표가 변경이 동시에 요청되어 건너뜀 (옵션 있는 상품은 대표가를 별도로 바꿀 수 없음)"})
+        elif without_option:
+            for c in without_option:
+                try:
+                    ok, msg = naver_api.update_naver_sale_price(channel_id, c.new_price)
+                except Exception as e:
+                    ok, msg = False, f"처리 중 오류: {e}"
+                results.append({"product_name": c.product_name, "channel": "naver", "option_name": None, "success": ok, "message": msg})
 
     for c in unsupported_changes:
         results.append({"product_name": c.product_name, "channel": c.channel, "option_name": c.option_name,
@@ -2098,10 +2114,13 @@ def channel_price_sync(payload: ChannelPriceSyncIn):
     if channel_link_id_fixes:
         with _channel_link_lock:
             link_data = _load_json_file(CHANNEL_LINK_FILE, {})
+            changed = False
             for product_name, old_option_id, new_option_id in channel_link_id_fixes:
                 entry = (link_data.get(product_name) or {}).get("naver")
                 if entry and str(entry.get("option_id")) == str(old_option_id):
                     entry["option_id"] = new_option_id
-            _save_json_file(CHANNEL_LINK_FILE, link_data)
+                    changed = True
+            if changed:
+                _save_json_file(CHANNEL_LINK_FILE, link_data)
 
     return {"status": "success", "results": results}
