@@ -90,6 +90,69 @@ async def log_requests(request: Request, call_next):
         raise
 
 # ==========================================
+# 🔄 price_changes 계산 (순수 로직)
+# ==========================================
+CHANNEL_PRICE_COLUMNS = {"naver": "네이버 판매가", "coupang": "쿠팡 판매가", "sikbom": "식봄 판매가"}
+
+
+def _prices_equal(a, b):
+    if a is None or a == "" or b is None or b == "":
+        return False
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
+def _compute_price_changes(old_rows, new_rows, channel_links):
+    """이전 저장본과 새 저장본을 상품명 기준으로 비교해서, 채널연결된 상품×채널 중
+    최종 판매가가 달라진 것만 골라 price_changes 리스트로 만든다."""
+    def product_name_of(row):
+        return str(row.get("온라인 상품명") or row.get("상품명") or "").strip()
+
+    old_by_name = {}
+    for row in old_rows:
+        name = product_name_of(row)
+        if name:
+            old_by_name[name] = row
+
+    changes = []
+    for row in new_rows:
+        product_name = product_name_of(row)
+        if not product_name:
+            continue
+        links = channel_links.get(product_name)
+        if not links:
+            continue
+        old_row = old_by_name.get(product_name)
+        for channel, price_col in CHANNEL_PRICE_COLUMNS.items():
+            link = links.get(channel)
+            if not link:
+                continue
+            new_price = row.get(price_col)
+            if new_price is None or new_price == "":
+                continue
+            old_price = None
+            if old_row is not None:
+                candidate_old = old_row.get(price_col)
+                if _prices_equal(candidate_old, new_price):
+                    continue
+                if candidate_old not in (None, ""):
+                    old_price = candidate_old
+            changes.append({
+                "product_name": product_name,
+                "channel": channel,
+                "channel_id": link.get("id"),
+                "channel_name": link.get("name", ""),
+                "option_id": link.get("option_id"),
+                "option_name": link.get("option_name"),
+                "vendor_item_id": link.get("vendor_item_id"),
+                "old_price": old_price,
+                "new_price": new_price,
+            })
+    return changes
+
+# ==========================================
 # 🛠️ [핵심] 엑셀 데이터 정제 함수 (중복 제거 및 이름 수정)
 # ==========================================
 def clean_dataframe(df):
