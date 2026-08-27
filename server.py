@@ -436,6 +436,12 @@ def get_naver_product_detail(channel_no: str):
     if data: return {"status": "success", "data": data}
     return {"status": "error", "message": "상세 정보 불러오기 실패"}
 
+@app.get("/api/coupang/products/{seller_product_id}")
+def get_coupang_product_detail_route(seller_product_id: str):
+    data = coupang_api.get_coupang_product_detail(seller_product_id)
+    if data: return {"status": "success", "data": data}
+    return {"status": "error", "message": "상세 정보 불러오기 실패"}
+
 @app.get("/api/naver/keyword/{keyword}")
 def get_naver_keyword(keyword: str):
     try:
