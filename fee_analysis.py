@@ -3,6 +3,7 @@ import time
 import datetime as dt
 import requests
 from difflib import SequenceMatcher
+from urllib.parse import urlencode
 
 MATCH_THRESHOLD = 0.55
 
@@ -202,6 +203,68 @@ def _fetch_naver_quantities(product_order_ids, warnings):
                            "status": po.get("productOrderStatus", "")}
         time.sleep(0.2)
     return result
+
+
+_CP_BASE = "https://api-gateway.coupang.com"
+_CP_REVENUE_PATH = "/v2/providers/openapi/apis/api/v1/revenue-history"
+
+
+def _cp_split_ranges(start, end):
+    ranges, cur = [], start
+    while cur <= end:
+        seg_end = min(cur + dt.timedelta(days=30), end)
+        ranges.append((cur, seg_end))
+        cur = seg_end + dt.timedelta(days=1)
+    return ranges
+
+
+def _fetch_coupang_revenue(month, warnings):
+    from apis import coupang_api as cpa
+    start, end = _month_window(month)
+    out = []
+    for seg_from, seg_to in _cp_split_ranges(start, end):
+        token = ""
+        page_guard = 0
+        while True:
+            page_guard += 1
+            params = {
+                "vendorId": cpa.VENDOR_ID,
+                "recognitionDateFrom": seg_from.isoformat(),
+                "recognitionDateTo": seg_to.isoformat(),
+                "maxPerPage": 50, "token": token,
+            }
+            uri = _CP_REVENUE_PATH + "?" + urlencode(params)
+            try:
+                auth = cpa.generate_coupang_signature("GET", uri)
+                r = cpa._request("GET", _CP_BASE + uri, headers={
+                    "Authorization": auth, "Content-Type": "application/json;charset=UTF-8",
+                    "Accept": "application/json",
+                })
+                if r.status_code != 200:
+                    raise RuntimeError("HTTP %s %s" % (r.status_code, r.text[:200]))
+                body = r.json()
+            except (requests.RequestException, RuntimeError, ValueError) as e:
+                # 요청/HTTP/JSON파싱 실패만 흡수 (ValueError=JSONDecodeError). 아이템 매핑 오류는
+                # try 밖이라 그대로 전파됨.
+                warnings.append("쿠팡 정산 조회 실패(%s~%s): %s" % (seg_from, seg_to, e))
+                break
+            for od in body.get("data", []):
+                if str(od.get("saleDate", ""))[:7] != month:
+                    continue
+                sign = -1.0 if od.get("saleType") == "REFUND" else 1.0
+                for it in od.get("items", []):
+                    out.append({
+                        "vendor_item_id": str(it.get("vendorItemId")),
+                        "product_id": (str(it["productId"]) if it.get("productId") else None),
+                        "product_name": it.get("productName", ""),
+                        "revenue": sign * float(it.get("saleAmount") or 0),
+                        "fee": sign * (float(it.get("serviceFee") or 0) + float(it.get("serviceFeeVat") or 0)),
+                        "qty": sign * float(it.get("quantity") or 0),
+                    })
+            if not body.get("hasNext") or not body.get("nextToken") or page_guard > 500:
+                break
+            token = body["nextToken"]
+    return out
 
 
 def _aggregate(naver_lines, coupang_lines, margin_rows, links):

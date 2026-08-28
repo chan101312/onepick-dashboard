@@ -251,3 +251,40 @@ def test_fetch_naver_settle_no_dup_on_pagination_retry(monkeypatch):
     ids = [r["product_order_id"] for r in out]
     assert ids.count("p1") == 1
     assert ids.count("p2") == 1
+
+
+def test_fetch_coupang_revenue_refund_and_filter(monkeypatch):
+    monkeypatch.setattr(fa.time, "sleep", lambda *a, **k: None)
+    pages = [
+        {"code": 200, "data": [
+            {"orderId": 1, "saleType": "SALE", "saleDate": "2026-07-03", "items": [
+                {"vendorItemId": 111, "productId": 9, "productName": "훈제오리",
+                 "saleAmount": 94400, "serviceFee": 10006, "serviceFeeVat": 1001, "quantity": 1}]},
+            {"orderId": 2, "saleType": "REFUND", "saleDate": "2026-07-04", "items": [
+                {"vendorItemId": 111, "productId": 9, "productName": "훈제오리",
+                 "saleAmount": 94400, "serviceFee": 10006, "serviceFeeVat": 1001, "quantity": 1}]},
+            {"orderId": 3, "saleType": "SALE", "saleDate": "2026-06-25", "items": [
+                {"vendorItemId": 222, "productId": 8, "productName": "제외대상",
+                 "saleAmount": 5000, "serviceFee": 500, "serviceFeeVat": 50, "quantity": 1}]},
+        ], "hasNext": False, "nextToken": None},
+    ]
+
+    def fake_request(method, url, headers=None, **kw):
+        if not pages:                                  # 2번째 구간 조회 → 데이터 없음
+            return _Resp(500, {"error": "no data"})
+        return _Resp(200, pages.pop(0))
+
+    import apis.coupang_api as cpa
+    monkeypatch.setattr(cpa, "_request", fake_request)
+    monkeypatch.setattr(cpa, "generate_coupang_signature", lambda m, u: "sig")
+    monkeypatch.setattr(cpa, "VENDOR_ID", "A0", raising=False)
+
+    warnings = []
+    out = fa._fetch_coupang_revenue("2026-07", warnings)
+    by_vi = {}
+    for r in out:
+        by_vi.setdefault(r["vendor_item_id"], []).append(r)
+    assert "222" not in by_vi                          # 6월 판매 제외
+    sale, refund = sorted(by_vi["111"], key=lambda r: r["revenue"], reverse=True)
+    assert sale["revenue"] == 94400 and sale["fee"] == 11007 and sale["qty"] == 1
+    assert refund["revenue"] == -94400 and refund["fee"] == -11007 and refund["qty"] == -1
