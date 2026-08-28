@@ -6,6 +6,7 @@ requests
 bcrypt
 pandas
 openpyxl
+pytest
 
 
 
