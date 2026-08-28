@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE } from '../apiBase';
-import { useTheme } from '../ThemeContext';
 
 const emptyForm = { product_name: '', lead_time_days: 3, safety_stock_days: 7, sales_cycle_days: 14, on_demand: false };
 const SALES_CYCLE_OPTIONS = [
@@ -21,9 +20,6 @@ function extractErrorMessage(result, res) {
 }
 
 export default function ReorderSettingsTab() {
-  const { theme } = useTheme();
-  const isLight = theme === 'light';
-
   const [configs, setConfigs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [newConfig, setNewConfig] = useState(emptyForm);
@@ -172,27 +168,19 @@ export default function ReorderSettingsTab() {
     }
   };
 
-  const themeVars = {
-    '--local-box': isLight ? '#f0f1f3' : 'rgba(255,255,255,0.02)',
-    '--local-text': isLight ? '#1a1a1a' : 'var(--text)',
-    '--local-text-muted': isLight ? '#4b5563' : 'var(--text-muted)',
-    '--local-border': isLight ? '#a0a9bf' : 'var(--border)',
-    '--local-input-bg': isLight ? '#e8eaef' : 'rgba(255,255,255,0.03)',
-  };
-
   return (
-    <div className="responsive-container" style={themeVars}>
+    <div className="responsive-container">
       <div style={{ marginBottom: '20px' }}>
-        <p style={{ margin: 0, fontSize: '13px', color: 'var(--local-text-muted)' }}>
+        <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)' }}>
           재고/판매 데이터는 <strong>E상인 재고 탭(재고 파악)</strong>을 열 때마다 자동으로 갱신되는 실 데이터를 그대로 사용합니다.
           여기서는 상품별 <strong>발주 리드타임</strong>·<strong>안전재고 일수</strong>·<strong>판매 주기</strong>만 필요할 때 조정하세요.
           (설정하지 않으면 기본값 리드타임 3일 · 안전재고 7일 · 판매주기 14일 적용)
         </p>
-        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--local-text-muted)' }}>
+        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--text-3)' }}>
           ※ 판매 주기: 박스/묶음 단위로 몰아서 나가는 상품은 일평균 판매량이 비정상적으로 크게 나올 수 있습니다.
           실제 발주 주기(1~2주 등)에 맞게 짧게 설정하면 그 기간 동안의 판매량을 기준으로 계산합니다.
         </p>
-        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--local-text-muted)' }}>
+        <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--text-3)' }}>
           ※ 당일매입형: 비엔나처럼 재고를 미리 쌓아두지 않고 주문이 오면 그때 매입해서 바로 출고하는 상품입니다.
           체크하면 재고가 적어도 재발주 알림에서 완전히 제외됩니다.
         </p>
@@ -200,16 +188,16 @@ export default function ReorderSettingsTab() {
 
       {esanginError && (
         <div style={{
-          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
-          background: 'rgba(255, 149, 0, 0.1)', border: '1px solid rgba(255, 149, 0, 0.35)',
-          color: '#ff9500', fontSize: '13px', fontWeight: 600,
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '16px',
+          background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
+          color: 'var(--amber)', fontSize: '12px', fontWeight: 600,
         }}>
           ⚠️ {esanginError} — E상인 재고 탭(재고 파악)을 먼저 열어 데이터를 불러온 뒤 다시 시도해주세요.
         </div>
       )}
 
-      <div style={{ background: 'var(--local-box)', borderRadius: '14px', border: '1px solid var(--local-border)', padding: '16px', marginBottom: '20px' }}>
-        <div style={{ fontWeight: 700, marginBottom: '10px', color: 'var(--local-text)' }}>➕ 상품별 설정 추가</div>
+      <div style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--border)', padding: '16px', marginBottom: '20px' }}>
+        <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '10px', color: 'var(--text)' }}>➕ 상품별 설정 추가</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', alignItems: 'center' }}>
           <select
             value={newConfig.product_name}
@@ -246,7 +234,7 @@ export default function ReorderSettingsTab() {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--local-text)', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text)', cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={!!newConfig.on_demand}
@@ -259,17 +247,17 @@ export default function ReorderSettingsTab() {
         </div>
       </div>
 
-      <div style={{ background: 'var(--local-box)', borderRadius: '14px', border: '1px solid var(--local-border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--border)', overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', whiteSpace: 'nowrap' }}>
-            <thead style={{ background: 'var(--local-input-bg)' }}>
+            <thead style={{ background: 'var(--surface-2)' }}>
               <tr>
-                <th style={{ padding: '14px', textAlign: 'left', color: 'var(--local-text-muted)' }}>상품명</th>
-                <th style={{ padding: '14px', color: 'var(--local-text-muted)' }}>리드타임(일)</th>
-                <th style={{ padding: '14px', color: 'var(--local-text-muted)' }}>안전재고 일수</th>
-                <th style={{ padding: '14px', color: 'var(--local-text-muted)' }}>판매 주기</th>
-                <th style={{ padding: '14px', color: 'var(--local-text-muted)' }}>당일매입형</th>
-                <th style={{ padding: '14px', color: 'var(--local-text-muted)' }}>관리</th>
+                <th style={{ padding: '14px', textAlign: 'left', color: 'var(--text-3)', fontSize: '13px' }}>상품명</th>
+                <th style={{ padding: '14px', color: 'var(--text-3)', fontSize: '13px' }}>리드타임(일)</th>
+                <th style={{ padding: '14px', color: 'var(--text-3)', fontSize: '13px' }}>안전재고 일수</th>
+                <th style={{ padding: '14px', color: 'var(--text-3)', fontSize: '13px' }}>판매 주기</th>
+                <th style={{ padding: '14px', color: 'var(--text-3)', fontSize: '13px' }}>당일매입형</th>
+                <th style={{ padding: '14px', color: 'var(--text-3)', fontSize: '13px' }}>관리</th>
               </tr>
             </thead>
             <tbody>
@@ -278,7 +266,7 @@ export default function ReorderSettingsTab() {
                   const draft = getDraft(c);
                   const dirty = !!editRows[c.id];
                   return (
-                    <tr key={c.id} style={{ borderBottom: '1px solid var(--local-border)' }}>
+                    <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '10px', textAlign: 'left', minWidth: '220px' }}>
                         <select
                           value={draft.product_name}
@@ -340,7 +328,7 @@ export default function ReorderSettingsTab() {
                           <button
                             onClick={() => handleDeleteRow(c.id)}
                             className="esangin-btn"
-                            style={{ padding: '6px 10px', fontSize: '12px', background: '#ff4d4f' }}
+                            style={{ padding: '6px 10px', fontSize: '12px', background: 'var(--danger)' }}
                           >
                             삭제
                           </button>
@@ -351,7 +339,7 @@ export default function ReorderSettingsTab() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="6" style={{ padding: '50px', color: 'var(--local-text-muted)', textAlign: 'center' }}>
+                  <td colSpan="6" style={{ padding: '50px', color: 'var(--text-3)', textAlign: 'center' }}>
                     {isLoading
                       ? '불러오는 중...'
                       : '등록된 상품별 설정이 없습니다. 모든 상품은 기본값(리드타임 3일 · 안전재고 7일 · 판매주기 14일)으로 계산됩니다.'}

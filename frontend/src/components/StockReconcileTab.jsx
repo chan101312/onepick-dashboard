@@ -2,18 +2,19 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { API_BASE } from '../apiBase';
 import { Emoji } from './Icons';
 
+const NEUTRAL_BADGE = { bg: 'var(--surface-2)', border: 'var(--border)', text: 'var(--text-3)' };
 const CHANNEL_BADGE = {
-  쿠팡: { bg: 'rgba(255, 61, 46, 0.12)', border: '#ff3d2e', text: '#ff3d2e' },
-  네이버: { bg: 'rgba(3, 199, 90, 0.12)', border: '#03c75a', text: '#03c75a' },
-  식봄: { bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', text: '#64748b' },
-  배민상회: { bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', text: '#64748b' },
+  쿠팡: { bg: 'color-mix(in srgb, var(--danger) 12%, transparent)', border: 'var(--danger)', text: 'var(--danger)' },
+  네이버: { bg: 'color-mix(in srgb, var(--success) 12%, transparent)', border: 'var(--success)', text: 'var(--success)' },
+  식봄: NEUTRAL_BADGE,
+  배민상회: NEUTRAL_BADGE,
 };
-const DEFAULT_BADGE = { bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', text: '#64748b' };
+const DEFAULT_BADGE = NEUTRAL_BADGE;
 
 // 카드 배경/테두리는 채널색이 아니라 심각도(confidence)로 — 대부분 쿠팡이라 전부 빨갛게 보이던 걸 완화
 const CONFIDENCE_CARD = {
-  high: { bg: 'rgba(248, 113, 90, 0.08)', border: 'rgba(248, 113, 90, 0.3)' },
-  medium: { bg: 'rgba(148, 163, 184, 0.08)', border: 'rgba(148, 163, 184, 0.28)' },
+  high: { bg: 'color-mix(in srgb, var(--danger) 8%, transparent)', border: 'color-mix(in srgb, var(--danger) 30%, transparent)' },
+  medium: { bg: 'color-mix(in srgb, var(--text-3) 8%, transparent)', border: 'color-mix(in srgb, var(--text-3) 28%, transparent)' },
 };
 
 function orderCardConfidence(items) {

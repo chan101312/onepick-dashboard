@@ -15,6 +15,9 @@ export default function MemoTab() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
   const fetchFreeform = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/memos/freeform`, {
@@ -143,15 +146,76 @@ export default function MemoTab() {
     }
   };
 
+  const reorderMemos = async (orderedIds) => {
+    const bodyStr = JSON.stringify({ ordered_ids: orderedIds });
+    console.log('[MemoTab][debug] PUT /api/memos/reorder request body:', bodyStr);
+    console.log('[MemoTab][debug] ordered_ids element types:', orderedIds.map((v) => typeof v));
+    try {
+      const res = await fetch(`${API_BASE}/api/memos/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyStr,
+      });
+      const result = await res.json().catch(() => ({}));
+      console.log('[MemoTab][debug] reorder response status:', res.status, 'body:', result);
+      if (!(res.ok && result.status === 'success')) {
+        alert(`순서 저장 실패: ${result.message || '알 수 없는 오류'}`);
+        fetchMemos();
+      }
+    } catch (e) {
+      console.error('[MemoTab][debug] reorder fetch threw:', e);
+      alert(`순서 저장 실패: 서버에 연결할 수 없습니다. (${e.message})`);
+      fetchMemos();
+    }
+  };
+
+  const handleDragStart = (id) => (e) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (id) => (e) => {
+    e.preventDefault();
+    if (dragOverId !== id) setDragOverId(id);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  const handleDrop = (targetId) => (e) => {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const fromIdx = memos.findIndex((m) => m.id === draggedId);
+    const toIdx = memos.findIndex((m) => m.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    const list = [...memos];
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    setMemos(list);
+    setDraggedId(null);
+    setDragOverId(null);
+    reorderMemos(list.map((m) => m.id));
+  };
+
   return (
     <div className="responsive-container">
       {/* 자유 메모장 */}
       <div style={{
-        marginBottom: '24px', padding: '16px', borderRadius: '14px',
+        marginBottom: '24px', padding: '16px', borderRadius: '16px',
         background: 'var(--surface)', border: '1px solid var(--border)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}><Emoji>📝</Emoji> 자유 메모장</span>
+          <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}><Emoji>📝</Emoji> 자유 메모장</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {saveMsg && <span style={{ color: 'var(--success)', fontSize: '13px' }}>{saveMsg}</span>}
             <button
@@ -169,8 +233,8 @@ export default function MemoTab() {
           onChange={(e) => setFreeformText(e.target.value)}
           placeholder="자유롭게 메모를 남겨보세요..."
           style={{
-            width: '100%', minHeight: '180px', padding: '12px', borderRadius: '10px',
-            border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
+            width: '100%', minHeight: '180px', padding: '12px', borderRadius: '16px',
+            border: '1px solid var(--border)', background: 'var(--surface-2)',
             color: 'var(--text)', fontSize: '14px', lineHeight: 1.6, resize: 'vertical',
             outline: 'none', fontFamily: 'inherit',
           }}
@@ -183,7 +247,7 @@ export default function MemoTab() {
       </div>
 
       {/* 개별 메모 카드 */}
-      <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>
+      <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>
         <Emoji>🗒️</Emoji> 메모 카드
       </div>
 
@@ -195,8 +259,8 @@ export default function MemoTab() {
           onKeyDown={(e) => { if (e.key === 'Enter') addMemo(); }}
           placeholder="새 메모 추가하고 Enter"
           style={{
-            flex: 1, padding: '10px 12px', borderRadius: '10px',
-            border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
+            flex: 1, padding: '10px 12px', borderRadius: '16px',
+            border: '1px solid var(--border)', background: 'var(--surface-2)',
             color: 'var(--text)', fontSize: '14px', outline: 'none',
           }}
         />
@@ -205,7 +269,7 @@ export default function MemoTab() {
 
       {errorMsg && (
         <div style={{
-          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '16px',
           background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
           color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
@@ -222,84 +286,81 @@ export default function MemoTab() {
           등록된 메모가 없습니다.
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
-          {memos.map((memo) => (
-            <div
-              key={memo.id}
-              style={{
-                background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px',
-              }}
-            >
-              {editingId === memo.id ? (
-                <textarea
-                  value={editingText}
-                  onChange={(e) => setEditingText(e.target.value)}
-                  style={{
-                    width: '100%', minHeight: '80px', padding: '8px', borderRadius: '8px',
-                    border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
-                    color: 'var(--text)', fontSize: '13px', outline: 'none', resize: 'vertical',
-                    fontFamily: 'inherit',
-                  }}
-                />
-              ) : (
-                <div style={{
-                  fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word', minHeight: '40px',
-                }}>
-                  {memo.text}
-                </div>
-              )}
-              <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>
-                {memo.updated_at}
-              </div>
-              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px', alignItems: 'start' }}>
+          {memos.map((memo) => {
+            const isDragging = draggedId === memo.id;
+            const isDragOver = dragOverId === memo.id && draggedId !== null && draggedId !== memo.id;
+            const canDrag = editingId !== memo.id;
+
+            return (
+              <div
+                key={memo.id}
+                className="ui-card"
+                draggable={canDrag}
+                onDragStart={handleDragStart(memo.id)}
+                onDragOver={handleDragOver(memo.id)}
+                onDrop={handleDrop(memo.id)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  background: 'var(--surface)',
+                  border: isDragOver ? '2px dashed var(--accent)' : '1px solid var(--border)',
+                  borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px',
+                  opacity: isDragging ? 0.4 : 1,
+                  cursor: canDrag ? 'grab' : 'default',
+                  transition: 'opacity .15s, border-color .15s',
+                }}
+              >
                 {editingId === memo.id ? (
-                  <>
-                    <button
-                      onClick={() => saveEdit(memo.id)}
-                      style={{
-                        padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--accent)',
-                        background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--text)', fontSize: '12px', cursor: 'pointer',
-                      }}
-                    >
-                      저장
-                    </button>
-                    <button
-                      onClick={cancelEdit}
-                      style={{
-                        padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)',
-                        background: 'transparent', color: 'var(--text-3)', fontSize: '12px', cursor: 'pointer',
-                      }}
-                    >
-                      취소
-                    </button>
-                  </>
+                  <textarea
+                    value={editingText}
+                    onChange={(e) => setEditingText(e.target.value)}
+                    style={{
+                      width: '100%', minHeight: '80px', padding: '8px', borderRadius: '8px',
+                      border: '1px solid var(--border)', background: 'var(--surface-2)',
+                      color: 'var(--text)', fontSize: '13px', outline: 'none', resize: 'vertical',
+                      fontFamily: 'inherit',
+                    }}
+                  />
                 ) : (
-                  <>
-                    <button
-                      onClick={() => startEdit(memo)}
-                      style={{
-                        padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)',
-                        background: 'transparent', color: 'var(--text-3)', fontSize: '12px', cursor: 'pointer',
-                      }}
-                    >
-                      수정
-                    </button>
-                    <button
-                      onClick={() => deleteMemo(memo.id)}
-                      style={{
-                        padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.4)',
-                        background: 'transparent', color: '#fca5a5', fontSize: '12px', cursor: 'pointer',
-                      }}
-                    >
-                      삭제
-                    </button>
-                  </>
+                  <div style={{
+                    fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word', minHeight: '40px',
+                  }}>
+                    {memo.text}
+                  </div>
                 )}
+
+                <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>
+                  {memo.updated_at}
+                </div>
+                <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                  {editingId === memo.id ? (
+                    <>
+                      <button
+                        onClick={() => saveEdit(memo.id)}
+                        className="tab-icon-btn"
+                        style={{ border: '1px solid var(--accent)', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--text)' }}
+                      >
+                        저장
+                      </button>
+                      <button onClick={cancelEdit} className="tab-icon-btn">
+                        취소
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => startEdit(memo)} className="tab-icon-btn">
+                        수정
+                      </button>
+                      <button onClick={() => deleteMemo(memo.id)} className="tab-icon-btn danger">
+                        삭제
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

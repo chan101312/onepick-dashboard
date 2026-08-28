@@ -263,7 +263,7 @@ export default function TodoListTab() {
     <div className="responsive-container">
       {errorMsg && (
         <div style={{
-          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '16px',
           background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
           color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
@@ -273,11 +273,11 @@ export default function TodoListTab() {
 
       {checklistDate && (
         <div style={{
-          marginBottom: '20px', padding: '16px', borderRadius: '12px',
+          marginBottom: '20px', padding: '16px', borderRadius: '16px',
           background: 'var(--surface)', border: '1px solid var(--border)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <span style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text)' }}>
+            <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>
               <Emoji>🔒</Emoji> 퇴근 전 체크리스트 {checklistDate ? `(${checklistDate})` : ''}
             </span>
           </div>
@@ -295,17 +295,18 @@ export default function TodoListTab() {
                   type="checkbox"
                   checked={item.done}
                   onChange={() => toggleChecklistItem(item)}
-                  style={{ width: '22px', height: '22px', cursor: 'pointer', flexShrink: 0 }}
+                  style={{ width: '20px', height: '20px', cursor: 'pointer', flexShrink: 0 }}
                 />
                 <span style={{
-                  fontSize: '17px', color: item.done ? 'var(--text-3)' : 'var(--text)',
+                  fontSize: '14px', color: item.done ? 'var(--text-3)' : 'var(--text)',
                   textDecoration: item.done ? 'line-through' : 'none',
                 }}>
                   {item.text}
                 </span>
                 <button
                   onClick={() => deleteChecklistItem(item.id)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}
+                  className="tab-icon-btn"
+                  style={{ border: 'none', padding: '2px 6px', lineHeight: 1 }}
                   title="이 항목 삭제 (매일 목록에서 제거됩니다)"
                 >
                   <Emoji>✕</Emoji>
@@ -322,11 +323,11 @@ export default function TodoListTab() {
               placeholder="매일 반복할 항목 추가 (예: 가스 밸브 잠그기)"
               style={{
                 flex: 1, padding: '10px 12px', borderRadius: '8px',
-                border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
-                color: 'var(--text)', fontSize: '15px', outline: 'none',
+                border: '1px solid var(--border)', background: 'var(--surface-2)',
+                color: 'var(--text)', fontSize: '14px', outline: 'none',
               }}
             />
-            <button onClick={addChecklistItem} className="esangin-btn" style={{ padding: '10px 16px', fontSize: '15px' }}>추가</button>
+            <button onClick={addChecklistItem} className="esangin-btn">추가</button>
           </div>
         </div>
       )}
@@ -343,13 +344,7 @@ export default function TodoListTab() {
           </div>
 
           <div style={{ textAlign: 'right', marginBottom: '10px' }}>
-            <button
-              onClick={goToday}
-              style={{
-                background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-3)',
-                borderRadius: '8px', padding: '5px 12px', fontSize: '12px', cursor: 'pointer',
-              }}
-            >
+            <button onClick={goToday} className="tab-icon-btn" style={{ padding: '5px 12px', fontSize: '12px' }}>
               오늘로 이동
             </button>
           </div>
@@ -407,7 +402,7 @@ export default function TodoListTab() {
 
         {/* 선택한 날짜의 할 일 목록 */}
         <div style={{ flex: '1 1 300px', minWidth: '280px' }}>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '12px' }}>
             {selectedDate} 할 일
           </div>
 
@@ -419,8 +414,8 @@ export default function TodoListTab() {
               onKeyDown={handleKeyDown}
               placeholder="할 일을 입력하고 Enter"
               style={{
-                flex: 1, padding: '10px 12px', borderRadius: '10px',
-                border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
+                flex: 1, padding: '10px 12px', borderRadius: '16px',
+                border: '1px solid var(--border)', background: 'var(--surface-2)',
                 color: 'var(--text)', fontSize: '14px', outline: 'none',
               }}
             />
@@ -443,9 +438,10 @@ export default function TodoListTab() {
                   style={{
                     display: 'flex', alignItems: 'center', gap: '10px',
                     background: t.done ? 'var(--surface-2)' : 'var(--surface)',
-                    border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px',
+                    border: '1px solid var(--border)', borderRadius: '16px', padding: '10px 12px',
                     opacity: t.done ? 0.6 : 1,
                   }}
+                  className="ui-card"
                 >
                   <input
                     type="checkbox"
@@ -461,7 +457,8 @@ export default function TodoListTab() {
                   </span>
                   <button
                     onClick={() => deleteTodo(t.id)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
+                    className="tab-icon-btn"
+                    style={{ border: 'none', padding: '2px 6px', lineHeight: 1 }}
                     title="삭제 (서버에서도 삭제됩니다)"
                   >
                     <Emoji>✕</Emoji>

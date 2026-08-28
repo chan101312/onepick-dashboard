@@ -4,8 +4,8 @@ import Pagination from './Pagination';
 import { Emoji } from './Icons';
 
 const SEVERITY_CONFIG = {
-  caution: { icon: '🟡', label: '주의', bg: 'rgba(250, 204, 21, 0.14)', border: '#eab308', text: '#b8860b' },
-  warning: { icon: '🟠', label: '경고', bg: 'rgba(255, 122, 69, 0.12)', border: '#ff7a45', text: '#ff7a45' },
+  caution: { icon: '🟡', label: '주의', bg: 'color-mix(in srgb, var(--amber) 12%, transparent)', border: 'var(--amber)', text: 'var(--amber)' },
+  warning: { icon: '🟠', label: '경고', bg: 'color-mix(in srgb, var(--amber) 10%, var(--danger) 10%)', border: 'color-mix(in srgb, var(--amber) 45%, var(--danger) 55%)', text: 'color-mix(in srgb, var(--amber) 45%, var(--danger) 55%)' },
   critical: { icon: '🔴', label: '심각', bg: 'color-mix(in srgb, var(--danger) 12%, transparent)', border: 'var(--danger)', text: 'var(--danger)' },
 };
 

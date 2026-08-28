@@ -4,9 +4,9 @@ import Pagination from './Pagination';
 import { Emoji } from './Icons';
 
 const SEVERITY_CONFIG = {
-  notable: { icon: '🟢', label: '주목', bg: 'color-mix(in srgb, var(--success) 14%, transparent)', border: 'var(--success)', text: 'var(--success)' },
-  high: { icon: '📈', label: '급증', bg: 'rgba(34, 197, 94, 0.14)', border: '#22c55e', text: '#15803d' },
-  explosive: { icon: '🚀', label: '폭발적', bg: 'color-mix(in srgb, var(--success) 16%, transparent)', border: 'var(--success)', text: '#166534' },
+  notable: { icon: '🟢', label: '주목', bg: 'color-mix(in srgb, var(--success) 10%, transparent)', border: 'var(--success)', text: 'var(--success)' },
+  high: { icon: '📈', label: '급증', bg: 'color-mix(in srgb, var(--success) 14%, transparent)', border: 'var(--success)', text: 'var(--success)' },
+  explosive: { icon: '🚀', label: '폭발적', bg: 'color-mix(in srgb, var(--success) 18%, transparent)', border: 'var(--success)', text: 'var(--success)' },
 };
 
 const SORT_OPTIONS = [
