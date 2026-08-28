@@ -29,9 +29,12 @@ from apis import playauto_rpa
 
 # 💡 재발주 알림 라우터
 from reorder import router as reorder_router
+# 💡 메모장 라우터 (자유메모 + 메모 카드) — memos.py 분리 모듈
+from memos import router as memos_router
 
 app = FastAPI()
 app.include_router(reorder_router)
+app.include_router(memos_router)
 
 
 # React와 통신 허가
