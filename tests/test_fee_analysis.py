@@ -219,3 +219,35 @@ def test_fetch_naver_quantities_batches(monkeypatch):
     q = fa._fetch_naver_quantities([f"po{i}" for i in range(650)], warnings)
     assert len(q) == 650
     assert q["po1"]["quantity"] == 2
+
+
+def test_fetch_naver_settle_no_dup_on_pagination_retry(monkeypatch):
+    monkeypatch.setattr(fa.time, "sleep", lambda *a, **k: None)
+    state = {}
+
+    def el(poid, amt, comm):
+        return {"productOrderType": "PROD_ORDER", "productOrderId": poid, "productId": "x",
+                "productName": "n", "payDate": "2026-07-05",
+                "paySettleAmount": amt, "totalPayCommissionAmount": comm}
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        if params["searchDate"] != "2026-07-01":
+            return _Resp(200, {"elements": [], "pagination": {"page": 1, "totalPages": 1}})
+        page = params["pageNumber"]
+        if page == 1:
+            return _Resp(200, {"elements": [el("p1", 100, -3)],
+                               "pagination": {"page": 1, "totalPages": 2}})
+        if not state.get("p2_ok"):
+            state["p2_ok"] = True
+            return _Resp(500, {})
+        return _Resp(200, {"elements": [el("p2", 200, -6)],
+                           "pagination": {"page": 2, "totalPages": 2}})
+
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "_request", fake_request)
+    monkeypatch.setattr(nav, "get_access_token", lambda: "tok")
+
+    out = fa._fetch_naver_settle("2026-07", [])
+    ids = [r["product_order_id"] for r in out]
+    assert ids.count("p1") == 1
+    assert ids.count("p2") == 1

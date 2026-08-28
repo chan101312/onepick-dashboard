@@ -1,6 +1,7 @@
 import re
 import time
 import datetime as dt
+import requests
 from difflib import SequenceMatcher
 
 MATCH_THRESHOLD = 0.55
@@ -135,6 +136,7 @@ def _fetch_naver_settle(month, warnings):
         ok = False
         for attempt in range(2):
             try:
+                rows_for_date = []
                 page = 1
                 while True:
                     r = naver_api._request("GET", _SETTLE_CASE, headers=headers, params={
@@ -149,7 +151,7 @@ def _fetch_naver_settle(month, warnings):
                             continue
                         if str(el.get("payDate", ""))[:7] != month:
                             continue
-                        out.append({
+                        rows_for_date.append({
                             "product_order_id": str(el.get("productOrderId")),
                             "product_id": (str(el["productId"]) if el.get("productId") else None),
                             "product_name": el.get("productName", ""),
@@ -161,9 +163,10 @@ def _fetch_naver_settle(month, warnings):
                     if page >= (pg.get("totalPages") or 1):
                         break
                     page += 1
+                out.extend(rows_for_date)
                 ok = True
                 break
-            except Exception:
+            except (requests.RequestException, RuntimeError):
                 time.sleep(0.5)
         if not ok:
             warnings.append("네이버 정산 조회 실패: %s" % ds)
@@ -187,7 +190,7 @@ def _fetch_naver_quantities(product_order_ids, warnings):
                     raise RuntimeError("HTTP %s" % r.status_code)
                 got = r.json().get("data", [])
                 break
-            except Exception:
+            except (requests.RequestException, RuntimeError):
                 time.sleep(0.5)
         if got is None:
             warnings.append("네이버 상품주문 조회 실패: %d건" % len(chunk))
