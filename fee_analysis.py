@@ -406,20 +406,28 @@ def _cache_path(month):
     return "fee_cache_%s.json" % month
 
 
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")   # month은 GET/POST 양쪽에서 검증 (경로 조작 방지)
+
+
 @router.get("/api/fee-analysis")
 def get_fee_analysis(month: str):
+    if not _MONTH_RE.match(month or ""):
+        return {"status": "error", "message": "month 형식은 YYYY-MM 이어야 합니다."}
     p = _cache_path(month)
     if not os.path.exists(p):
         return {"status": "error", "message": "아직 조회된 정산 데이터가 없습니다. '정산 갱신'을 눌러주세요."}
-    with open(p, "r", encoding="utf-8") as f:
-        return {"status": "success", **json.load(f)}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return {"status": "success", **json.load(f)}
+    except (OSError, ValueError):
+        return {"status": "error", "message": "캐시 파일을 읽을 수 없습니다. '정산 갱신'을 다시 눌러주세요."}
 
 
 @router.post("/api/fee-analysis/refresh")
 async def refresh_fee_analysis(request: Request):
     body = await request.json()
     month = (body or {}).get("month", "")
-    if not re.match(r"^\d{4}-\d{2}$", month):
+    if not _MONTH_RE.match(month or ""):
         return {"status": "error", "message": "month 형식은 YYYY-MM 이어야 합니다."}
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "error", "message": "조회가 이미 진행 중입니다."}

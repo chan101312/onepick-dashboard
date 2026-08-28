@@ -335,3 +335,15 @@ def test_endpoints_refresh_then_get(tmp_path, monkeypatch):
     r2 = c.get("/api/fee-analysis?month=2026-07")
     assert r2.json()["rows"][0]["product_name"] == "장터국수 우동국물"
     assert (tmp_path / "fee_cache_2026-07.json").exists()
+
+
+def test_get_fee_analysis_rejects_bad_month(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+    r = c.get("/api/fee-analysis?month=../../etc/passwd")
+    assert r.json()["status"] == "error"
+    assert "YYYY-MM" in r.json()["message"]
