@@ -288,3 +288,50 @@ def test_fetch_coupang_revenue_refund_and_filter(monkeypatch):
     sale, refund = sorted(by_vi["111"], key=lambda r: r["revenue"], reverse=True)
     assert sale["revenue"] == 94400 and sale["fee"] == 11007 and sale["qty"] == 1
     assert refund["revenue"] == -94400 and refund["fee"] == -11007 and refund["qty"] == -1
+
+
+def test_build_naver_lines_joins_qty():
+    settle = [
+        {"product_order_id": "po1", "product_id": "p1", "product_name": "상품1",
+         "pay_settle_amount": 10000.0, "commission": -300.0},
+        {"product_order_id": "po2", "product_id": "p2", "product_name": "상품2",
+         "pay_settle_amount": 5000.0, "commission": -150.0},
+    ]
+    qty_map = {"po1": {"quantity": 3.0, "status": "PURCHASE_DECIDED"}}
+    lines = fa._build_naver_lines(settle, qty_map)
+    l1 = next(l for l in lines if l["product_name"] == "상품1")
+    l2 = next(l for l in lines if l["product_name"] == "상품2")
+    assert l1["revenue"] == 10000.0 and l1["fee"] == 300.0 and l1["qty"] == 3.0
+    assert l1["qty_partial"] is False
+    assert l2["qty"] == 0.0 and l2["qty_partial"] is True     # 수량 조회 누락
+
+
+def test_endpoints_refresh_then_get(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)                                # 캐시파일을 임시 디렉터리에
+    monkeypatch.setattr(fa, "_fetch_naver_settle", lambda m, w: [
+        {"product_order_id": "po1", "product_id": "p1", "product_name": "장터국수 우동국물 6개",
+         "pay_settle_amount": 74500.0, "commission": -2237.0}])
+    monkeypatch.setattr(fa, "_fetch_naver_quantities", lambda ids, w: {"po1": {"quantity": 1.0, "status": "OK"}})
+    monkeypatch.setattr(fa, "_fetch_coupang_revenue", lambda m, w: [])
+    monkeypatch.setattr(fa, "_load_margin_rows", lambda: [
+        {"온라인 상품명": "장터국수 우동국물", "매입": "50000", "네이버 수수료": "4110", "네이버 판매가": "74500"}])
+    monkeypatch.setattr(fa, "_load_channel_links", lambda: {})
+
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+
+    r0 = c.get("/api/fee-analysis?month=2026-07")
+    assert r0.json()["status"] == "error"                      # 캐시 없음
+
+    r1 = c.post("/api/fee-analysis/refresh", json={"month": "2026-07"})
+    j1 = r1.json()
+    assert j1["status"] == "success"
+    assert j1["month"] == "2026-07" and j1["basis"] == "sale"
+    assert len(j1["rows"]) == 1
+
+    r2 = c.get("/api/fee-analysis?month=2026-07")
+    assert r2.json()["rows"][0]["product_name"] == "장터국수 우동국물"
+    assert (tmp_path / "fee_cache_2026-07.json").exists()

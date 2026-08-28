@@ -1,9 +1,15 @@
 import re
 import time
+import json
+import os
+import threading
 import datetime as dt
 import requests
+import pandas as pd
+from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
+from fastapi import APIRouter, Request
 
 MATCH_THRESHOLD = 0.55
 
@@ -333,3 +339,94 @@ def _aggregate(naver_lines, coupang_lines, margin_rows, links):
             "unmatched_revenue": t["unmatched_revenue"], "unmatched_fee": t["unmatched_fee"],
         }
     return {"channels": channels, "rows": rows, "unmatched": unmatched}
+
+
+router = APIRouter()
+_refresh_lock = threading.Lock()
+MARGIN_CSV = "uploads/online.csv"
+CHANNEL_LINK_FILE = "channel_link.json"
+_RETURN_HINTS = ("CANCEL", "RETURN", "REFUND")
+
+
+def _load_margin_rows():
+    if not os.path.exists(MARGIN_CSV):
+        return []
+    df = pd.read_csv(MARGIN_CSV, encoding="utf-8-sig")
+    df = df.where(pd.notnull(df), None)
+    return df.to_dict(orient="records")
+
+
+def _load_channel_links():
+    if not os.path.exists(CHANNEL_LINK_FILE):
+        return {}
+    try:
+        with open(CHANNEL_LINK_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _build_naver_lines(settle, qty_map):
+    lines = []
+    for s in settle:
+        poid = s["product_order_id"]
+        q = qty_map.get(poid)
+        qty = (q["quantity"] if q else 0.0)
+        partial = q is None
+        if q and any(h in str(q.get("status", "")).upper() for h in _RETURN_HINTS):
+            qty = -qty
+        lines.append({
+            "product_id": s.get("product_id"),
+            "product_name": s.get("product_name", ""),
+            "revenue": s.get("pay_settle_amount", 0.0),
+            "fee": abs(s.get("commission", 0.0)),
+            "qty": qty,
+            "qty_partial": partial,
+        })
+    return lines
+
+
+def build_payload(month):
+    warnings = []
+    settle = _fetch_naver_settle(month, warnings)
+    qty_map = _fetch_naver_quantities([s["product_order_id"] for s in settle], warnings)
+    naver_lines = _build_naver_lines(settle, qty_map)
+    coupang_lines = _fetch_coupang_revenue(month, warnings)
+    agg = _aggregate(naver_lines, coupang_lines, _load_margin_rows(), _load_channel_links())
+    kst = timezone(timedelta(hours=9))
+    return {
+        "month": month, "basis": "sale",
+        "fetched_at": datetime.now(kst).isoformat(timespec="seconds"),
+        "channels": agg["channels"], "rows": agg["rows"],
+        "unmatched": agg["unmatched"], "warnings": warnings,
+    }
+
+
+def _cache_path(month):
+    return "fee_cache_%s.json" % month
+
+
+@router.get("/api/fee-analysis")
+def get_fee_analysis(month: str):
+    p = _cache_path(month)
+    if not os.path.exists(p):
+        return {"status": "error", "message": "아직 조회된 정산 데이터가 없습니다. '정산 갱신'을 눌러주세요."}
+    with open(p, "r", encoding="utf-8") as f:
+        return {"status": "success", **json.load(f)}
+
+
+@router.post("/api/fee-analysis/refresh")
+async def refresh_fee_analysis(request: Request):
+    body = await request.json()
+    month = (body or {}).get("month", "")
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        return {"status": "error", "message": "month 형식은 YYYY-MM 이어야 합니다."}
+    if not _refresh_lock.acquire(blocking=False):
+        return {"status": "error", "message": "조회가 이미 진행 중입니다."}
+    try:
+        payload = build_payload(month)
+        with open(_cache_path(month), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return {"status": "success", **payload}
+    finally:
+        _refresh_lock.release()

@@ -31,10 +31,13 @@ from apis import playauto_rpa
 from reorder import router as reorder_router
 # 💡 메모장 라우터 (자유메모 + 메모 카드) — memos.py 분리 모듈
 from memos import router as memos_router
+# 💡 수수료분석 라우터 (정산 수수료 vs 예측 수수료) — fee_analysis.py 분리 모듈
+from fee_analysis import router as fee_analysis_router
 
 app = FastAPI()
 app.include_router(reorder_router)
 app.include_router(memos_router)
+app.include_router(fee_analysis_router)
 
 
 # React와 통신 허가

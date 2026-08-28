@@ -8,6 +8,7 @@ __pycache__/
 # Local data artifacts
 uploads/
 *.csv
+fee_cache_*.json
 
 # OS/editor
 .DS_Store
