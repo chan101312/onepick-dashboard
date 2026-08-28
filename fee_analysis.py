@@ -1,4 +1,6 @@
 import re
+import time
+import datetime as dt
 from difflib import SequenceMatcher
 
 MATCH_THRESHOLD = 0.55
@@ -103,6 +105,100 @@ def _compute_row(agg, margin_row, channel):
         "diff_amount": diff_amount,
         "diff_pct": diff_pct,
     }
+
+
+NAVER_BASE = "https://api.commerce.naver.com"
+_SETTLE_CASE = NAVER_BASE + "/external/v1/pay-settle/settle/case"
+_PO_QUERY = NAVER_BASE + "/external/v1/pay-order/seller/product-orders/query"
+
+
+def _month_window(month):
+    y, m = int(month[:4]), int(month[5:7])
+    start = dt.date(y, m, 1)
+    ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+    return start, dt.date(ny, nm, 20)
+
+
+def _naver_headers():
+    from apis import naver_api
+    return {"Authorization": "Bearer %s" % naver_api.get_access_token(), "Content-Type": "application/json"}
+
+
+def _fetch_naver_settle(month, warnings):
+    from apis import naver_api
+    headers = _naver_headers()
+    start, end = _month_window(month)
+    out = []
+    d = start
+    while d <= end:
+        ds = d.isoformat()
+        ok = False
+        for attempt in range(2):
+            try:
+                page = 1
+                while True:
+                    r = naver_api._request("GET", _SETTLE_CASE, headers=headers, params={
+                        "periodType": "SETTLE_CASEBYCASE_SETTLE_BASIS_DATE",
+                        "searchDate": ds, "pageNumber": page, "pageSize": 1000,
+                    })
+                    if r.status_code != 200:
+                        raise RuntimeError("HTTP %s" % r.status_code)
+                    body = r.json()
+                    for el in body.get("elements", []):
+                        if el.get("productOrderType") != "PROD_ORDER":
+                            continue
+                        if str(el.get("payDate", ""))[:7] != month:
+                            continue
+                        out.append({
+                            "product_order_id": str(el.get("productOrderId")),
+                            "product_id": (str(el["productId"]) if el.get("productId") else None),
+                            "product_name": el.get("productName", ""),
+                            "product_order_type": el.get("productOrderType"),
+                            "pay_settle_amount": float(el.get("paySettleAmount") or 0),
+                            "commission": float(el.get("totalPayCommissionAmount") or 0),
+                        })
+                    pg = body.get("pagination") or {}
+                    if page >= (pg.get("totalPages") or 1):
+                        break
+                    page += 1
+                ok = True
+                break
+            except Exception:
+                time.sleep(0.5)
+        if not ok:
+            warnings.append("네이버 정산 조회 실패: %s" % ds)
+        time.sleep(0.2)
+        d += dt.timedelta(days=1)
+    return out
+
+
+def _fetch_naver_quantities(product_order_ids, warnings):
+    from apis import naver_api
+    headers = _naver_headers()
+    ids = list(dict.fromkeys(product_order_ids))
+    result = {}
+    for i in range(0, len(ids), 300):
+        chunk = ids[i:i + 300]
+        got = None
+        for attempt in range(2):
+            try:
+                r = naver_api._request("POST", _PO_QUERY, headers=headers, json={"productOrderIds": chunk})
+                if r.status_code != 200:
+                    raise RuntimeError("HTTP %s" % r.status_code)
+                got = r.json().get("data", [])
+                break
+            except Exception:
+                time.sleep(0.5)
+        if got is None:
+            warnings.append("네이버 상품주문 조회 실패: %d건" % len(chunk))
+            continue
+        for od in got:
+            po = od.get("productOrder", {})
+            pid = str(po.get("productOrderId"))
+            result[pid] = {"quantity": float(po.get("quantity") or 0),
+                           "status": po.get("productOrderStatus", "")}
+        time.sleep(0.2)
+    return result
 
 
 def _aggregate(naver_lines, coupang_lines, margin_rows, links):

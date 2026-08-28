@@ -147,3 +147,75 @@ def test_aggregate_id_match_beats_name():
     out = fa._aggregate(naver_lines, [], margin_rows, links)
     assert out["rows"][0]["product_name"] == "정답상품"
     assert out["rows"][0]["match_method"] == "id"
+
+
+import datetime as _dt
+
+
+class _Resp:
+    def __init__(self, status, payload):
+        self.status_code = status
+        self._payload = payload
+        self.text = str(payload)
+
+    def json(self):
+        return self._payload
+
+
+def test_month_window():
+    a, b = fa._month_window("2026-07")
+    assert a == _dt.date(2026, 7, 1)
+    assert b == _dt.date(2026, 8, 20)
+
+
+def test_fetch_naver_settle_filters_by_paydate(monkeypatch):
+    monkeypatch.setattr(fa.time, "sleep", lambda *a, **k: None)   # 테스트 빠르게
+    calls = {"n": 0}
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        calls["n"] += 1
+        if "settle/case" in url:
+            return _Resp(200, {"elements": [
+                {"productOrderType": "PROD_ORDER", "productOrderId": "po1", "productId": "p1",
+                 "productName": "상품1", "payDate": "2026-07-15", "paySettleAmount": 10000,
+                 "totalPayCommissionAmount": -300},
+                {"productOrderType": "PROD_ORDER", "productOrderId": "po2", "productId": "p2",
+                 "productName": "상품2", "payDate": "2026-06-30", "paySettleAmount": 5000,
+                 "totalPayCommissionAmount": -150},
+                {"productOrderType": "DELIVERY", "productOrderId": "d1", "productId": None,
+                 "productName": "기본배송비", "payDate": "2026-07-15", "paySettleAmount": 3000,
+                 "totalPayCommissionAmount": -90},
+            ], "pagination": {"page": 1, "totalPages": 1}})
+        raise AssertionError(url)
+
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "_request", fake_request)
+    monkeypatch.setattr(nav, "get_access_token", lambda: "tok")
+
+    warnings = []
+    out = fa._fetch_naver_settle("2026-07", warnings)
+    ids = {r["product_order_id"] for r in out}
+    assert ids == {"po1"}                              # po2=6월 결제 제외, d1=DELIVERY 제외
+    assert out[0]["commission"] == -300
+    assert warnings == []
+
+
+def test_fetch_naver_quantities_batches(monkeypatch):
+    monkeypatch.setattr(fa.time, "sleep", lambda *a, **k: None)
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        assert "product-orders/query" in url
+        ids = json["productOrderIds"]
+        return _Resp(200, {"data": [
+            {"productOrder": {"productOrderId": i, "quantity": 2, "productOrderStatus": "PURCHASE_DECIDED"}}
+            for i in ids
+        ]})
+
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "_request", fake_request)
+    monkeypatch.setattr(nav, "get_access_token", lambda: "tok")
+
+    warnings = []
+    q = fa._fetch_naver_quantities([f"po{i}" for i in range(650)], warnings)
+    assert len(q) == 650
+    assert q["po1"]["quantity"] == 2
