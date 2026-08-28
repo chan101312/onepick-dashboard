@@ -112,12 +112,14 @@ def test_match_by_id():
 
 
 def test_match_by_name_fuzzy():
-    rows = [{"온라인 상품명": "장터국수 우동국물"}, {"온라인 상품명": "청어 6.5kg"}]
+    # 마진산출장부 상품명은 실제로 서술적이다(짧게 자르지 말 것). 임계값 0.55는
+    # 실 데이터 검증(18표본 중 16 매칭)에서 확정된 값.
+    rows = [{"온라인 상품명": "장터국수 우동국물1.8L X 6개"}, {"온라인 상품명": "청어 6.5kg"}]
     m_idx = fa._build_margin_index(rows)
     row, method, conf = fa._match_product(
         "장터국수 우동국물1.8L X 6개 육수 대용량 업소용", None, "naver", m_idx, {}
     )
-    assert row["온라인 상품명"] == "장터국수 우동국물"
+    assert row["온라인 상품명"] == "장터국수 우동국물1.8L X 6개"
     assert method == "name"
     assert conf >= fa.MATCH_THRESHOLD
 
@@ -382,7 +384,7 @@ git commit -m "feat: 수수료분석 상품×채널 1행 계산(_compute_row)"
 ```python
 def test_aggregate_matches_and_summarizes():
     margin_rows = [
-        {"온라인 상품명": "장터국수 우동국물", "매입": "50000", "자재비": "1000", "운송비": "0",
+        {"온라인 상품명": "장터국수 우동국물1.8L X 6개", "매입": "50000", "자재비": "1000", "운송비": "0",
          "네이버 수수료": "4110", "네이버 판매가": "74500",
          "쿠팡 수수료": "8503", "쿠팡 판매가": "80200"},
         {"온라인 상품명": "청어 6.5kg", "매입": "13000",
