@@ -619,16 +619,56 @@ def test_fetch_naver_quantities_batches(monkeypatch):
     q = fa._fetch_naver_quantities([f"po{i}" for i in range(650)], warnings)
     assert len(q) == 650
     assert q["po1"]["quantity"] == 2
+
+
+def test_fetch_naver_settle_no_dup_on_pagination_retry(monkeypatch):
+    monkeypatch.setattr(fa.time, "sleep", lambda *a, **k: None)
+    state = {}
+
+    def el(poid, amt, comm):
+        return {"productOrderType": "PROD_ORDER", "productOrderId": poid, "productId": "x",
+                "productName": "n", "payDate": "2026-07-05",
+                "paySettleAmount": amt, "totalPayCommissionAmount": comm}
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        # 첫 순회 날짜(2026-07-01)만 2페이지, 나머지 날짜는 빈 결과
+        if params["searchDate"] != "2026-07-01":
+            return _Resp(200, {"elements": [], "pagination": {"page": 1, "totalPages": 1}})
+        page = params["pageNumber"]
+        if page == 1:
+            return _Resp(200, {"elements": [el("p1", 100, -3)],
+                               "pagination": {"page": 1, "totalPages": 2}})
+        # page 2: 최초 1회만 실패 → 재시도 시 page 1부터 다시 → p1 재적재 위험
+        if not state.get("p2_ok"):
+            state["p2_ok"] = True
+            return _Resp(500, {})
+        return _Resp(200, {"elements": [el("p2", 200, -6)],
+                           "pagination": {"page": 2, "totalPages": 2}})
+
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "_request", fake_request)
+    monkeypatch.setattr(nav, "get_access_token", lambda: "tok")
+
+    out = fa._fetch_naver_settle("2026-07", [])
+    ids = [r["product_order_id"] for r in out]
+    assert ids.count("p1") == 1        # 재시도가 page-1 행을 중복 적재하면 안 됨
+    assert ids.count("p2") == 1
 ```
 
 - [ ] **Step 2: 실패 확인**
 
 Run: `python -m pytest tests/test_fee_analysis.py -k "month_window or naver_settle or naver_quantities" -v`
-Expected: FAIL — 해당 함수 없음
+Expected: `month_window`/`naver_settle`/`naver_quantities` 관련 함수 미정의로 FAIL (모듈은 `import time`/`import datetime as dt` 덕에 정상 수집됨)
 
 - [ ] **Step 3: 최소 구현**
 
-`fee_analysis.py` 상단에 `import time`, `import datetime as dt` 추가. 이후:
+`fee_analysis.py` 상단에 `import time`, `import datetime as dt`, `import requests` 추가
+(`requests`는 리포 하드 의존성이고 import 시 config/네트워크를 건드리지 않음 — 순수성 유지).
+재시도 `except`는 요청/HTTP 실패만 잡고 파싱 오류(`KeyError`/`ValueError` 등)는 전파시킨다
+(파싱 버그가 "조회 실패" 경고로 조용히 묻히면 프로덕션에서 실데이터가 소리 없이 누락됨).
+`_fetch_naver_settle`는 날짜별 행을 **로컬 리스트에 모았다가 그 날짜의 전 페이지가
+성공한 뒤에만** `out`에 반영한다 (중간 페이지 실패 → 재시도 시 앞 페이지 행 중복 적재 방지).
+이후:
 ```python
 NAVER_BASE = "https://api.commerce.naver.com"
 _SETTLE_CASE = NAVER_BASE + "/external/v1/pay-settle/settle/case"
@@ -657,6 +697,7 @@ def _fetch_naver_settle(month, warnings):
         ds = d.isoformat()
         ok = False
         for attempt in range(2):
+            rows_for_date = []
             try:
                 page = 1
                 while True:
@@ -672,7 +713,7 @@ def _fetch_naver_settle(month, warnings):
                             continue
                         if str(el.get("payDate", ""))[:7] != month:
                             continue
-                        out.append({
+                        rows_for_date.append({
                             "product_order_id": str(el.get("productOrderId")),
                             "product_id": (str(el["productId"]) if el.get("productId") else None),
                             "product_name": el.get("productName", ""),
@@ -684,9 +725,10 @@ def _fetch_naver_settle(month, warnings):
                     if page >= (pg.get("totalPages") or 1):
                         break
                     page += 1
+                out.extend(rows_for_date)   # 전 페이지 성공 후에만 반영 → 재시도 중복 방지
                 ok = True
                 break
-            except Exception:
+            except (requests.RequestException, RuntimeError):
                 time.sleep(0.5)
         if not ok:
             warnings.append("네이버 정산 조회 실패: %s" % ds)
@@ -710,7 +752,7 @@ def _fetch_naver_quantities(product_order_ids, warnings):
                     raise RuntimeError("HTTP %s" % r.status_code)
                 got = r.json().get("data", [])
                 break
-            except Exception:
+            except (requests.RequestException, RuntimeError):
                 time.sleep(0.5)
         if got is None:
             warnings.append("네이버 상품주문 조회 실패: %d건" % len(chunk))
@@ -727,7 +769,7 @@ def _fetch_naver_quantities(product_order_ids, warnings):
 - [ ] **Step 4: 통과 확인**
 
 Run: `python -m pytest tests/test_fee_analysis.py -v`
-Expected: PASS (14 tests)
+Expected: PASS (15 tests)
 
 - [ ] **Step 5: 커밋**
 
@@ -843,7 +885,9 @@ def _fetch_coupang_revenue(month, warnings):
                 if r.status_code != 200:
                     raise RuntimeError("HTTP %s %s" % (r.status_code, r.text[:200]))
                 body = r.json()
-            except Exception as e:
+            except (requests.RequestException, RuntimeError, ValueError) as e:
+                # 요청/HTTP/JSON파싱 실패만 흡수 (ValueError=JSONDecodeError). 아이템 매핑 오류는
+                # try 밖이라 그대로 전파됨.
                 warnings.append("쿠팡 정산 조회 실패(%s~%s): %s" % (seg_from, seg_to, e))
                 break
             for od in body.get("data", []):
