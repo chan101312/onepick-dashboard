@@ -1,7 +1,7 @@
 /* 💡 React 기본 스타일 족쇄 완벽 해제! */
 * {
   box-sizing: border-box;
-  font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+  font-family: 'Gowun Dodum', 'Pretendard', -apple-system, sans-serif;
 }
 
 html, body {
@@ -30,35 +30,39 @@ html, body {
   --danger: #f87171;
   --success: #4ade80;
 
+  --highlight: #f59e0b;
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 8px;
 }
 
-/* 라이트모드 변수 */
+/* 라이트모드 변수 — 흰 배경 + 검정 카드 + 노랑 포인트 */
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: #f8fafc;
+  --bg: #f7f7f5;
   --panel: #ffffff;
-  --surface: #f1f5f9;
-  --surface-2: #e2e8f0;
-  --border: #dbeafe;
-  --border-2: #bfdbfe;
+  --surface: #ffffff;
+  --surface-2: #f0f0ee;
+  --border: #e5e5e0;
+  --border-2: #d4d4cc;
 
-  --text: #0f172a;
-  --text-2: #334155;
-  --text-3: #64748b;
+  --text: #1a1a1a;
+  --text-2: #4a4a4a;
+  --text-3: #8a8a8a;
 
-  --primary: #1e40af;
-  --accent: #1e40af;
-  --accent-2: #3b82f6;
+  --primary: #1a1a1a;
+  --accent: #1a1a1a;
+  --accent-2: #1a1a1a;
+  --highlight: #ffd60a;
   --amber: #d97706;
-  --danger: #dc2626;
-  --success: #16a34a;
+  --danger: #ef4444;
+  --success: #22c55e;
 
-  --shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 8px;
@@ -73,6 +77,12 @@ body {
   display: block !important;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  /* 💡 .appShell::before 장식 원의 가로 bleed(right:-120px) 차단용.
+     html의 overflow-x가 visible이면 UA가 body의 overflow를 루트/뷰포트로
+     전파하고 body 자신은 다시 visible로 취급하므로(overflow propagation),
+     실제 스크롤 주체(뷰포트)만 가로로 제한될 뿐 .sidebar와 뷰포트 사이에
+     별도의 "정지된 스크롤 컨테이너"가 끼어들지 않는다 — sticky가 안전하다. */
+  overflow-x: hidden;
 }
 
 #root {
@@ -98,9 +108,9 @@ button, input, select, textarea {
 
 /* 라이트모드 select 스타일 */
 :root[data-theme='light'] select {
-  background-color: #f3f4f6 !important;
+  background-color: #f0f0ee !important;
   color: #1a1a1a !important;
-  border: 1px solid #d1d5db !important;
+  border: 1px solid #e5e5e0 !important;
 }
 
 :root[data-theme='light'] select option {
@@ -109,7 +119,7 @@ button, input, select, textarea {
 }
 
 :root[data-theme='light'] select:focus {
-  border-color: #3b82f6 !important;
+  border-color: #1a1a1a !important;
   outline: none;
 }
 

@@ -108,19 +108,11 @@ export default function TopRankingTab() {
 
   useEffect(() => { fetchTop5(); }, []);
 
-  const themeVars = {
-    bg: 'var(--panel)',
-    text: 'var(--text)',
-    textMuted: 'var(--text-3)',
-    border: 'var(--border)',
-    cardBg: 'var(--surface)',
-  };
-
-  if (loading) return <div style={{ padding: '40px', color: themeVars.text, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>E상인 DB에서 실시간 매출 데이터를 긁어와 분석 중입니다... <Emoji>🚀</Emoji></div>;
+  if (loading) return <div style={{ padding: '40px', color: 'var(--text)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>E상인 DB에서 실시간 매출 데이터를 긁어와 분석 중입니다... <Emoji>🚀</Emoji></div>;
   if (error) return (
     <div style={{ color: 'var(--danger)', padding: '20px', fontWeight: 'bold' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>⚠️</Emoji> {error}</span> <br/>
-      <button onClick={fetchTop5} style={{ marginTop: '15px', padding: '10px 20px', cursor: 'pointer', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+      <button onClick={fetchTop5} className="tab-cta-btn" style={{ marginTop: '15px', background: 'var(--danger)' }}>
         <Emoji>🔄</Emoji> 다시 시도
       </button>
     </div>
@@ -130,26 +122,26 @@ export default function TopRankingTab() {
   const currentData = rankingData[selectedMonth] || {};
 
   return (
-    <div style={{ padding: '20px', color: themeVars.text, transition: 'all 0.3s' }}>
-      
+    <div style={{ padding: '20px', color: 'var(--text)' }}>
+
       {/* 💡 헤더 영역 & 월별 선택기 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '15px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Emoji>🏆</Emoji> 플랫폼별 매출 TOP 5 랭킹
           </h2>
-          <p style={{ margin: '8px 0 0 0', fontSize: '14px', color: themeVars.textMuted }}>
+          <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: 'var(--text-3)' }}>
             * E상인(ERP)의 실제 거래처 매출 전표 데이터를 기반으로 집계됩니다.
           </p>
         </div>
 
         {/* 📅 달력 필터 (드롭다운) */}
-        <select 
-          value={selectedMonth} 
+        <select
+          value={selectedMonth}
           onChange={(e) => setSelectedMonth(e.target.value)}
           style={{
-            padding: '10px 16px', borderRadius: '8px', border: `1px solid ${themeVars.border}`, 
-            background: themeVars.cardBg, color: themeVars.text, fontWeight: 'bold', fontSize: '15px', 
+            padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--text)', fontWeight: 'bold', fontSize: '14px',
             cursor: 'pointer', outline: 'none'
           }}
         >
@@ -161,18 +153,18 @@ export default function TopRankingTab() {
       </div>
 
       {/* 💡 카드 영역 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
         {Object.entries(currentData).filter(([platform]) => !HIDDEN_MARKETS.includes(platform)).map(([platform, items]) => (
-          <div key={platform} style={{ 
-            background: themeVars.bg, border: `1px solid ${themeVars.border}`, 
-            borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)'
+          <div key={platform} className="ui-card" style={{
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderRadius: '16px', padding: '16px'
           }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', borderBottom: `2px solid ${themeVars.border}`, paddingBottom: '10px' }}>
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: 700, borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
               <EmojiText text={platform} />
             </h3>
-            
+
             {items && items.length > 0 ? (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {items.map((item, idx) => {
                   const matchedRow = marginLookup.get(normalizeProductName(item.name));
                   const marginRate = matchedRow ? getMarginRateForMarket(matchedRow, platform, marginFees) : null;
@@ -180,15 +172,15 @@ export default function TopRankingTab() {
                   return (
                   <li key={idx} style={{
                     display: 'flex', alignItems: 'center', gap: '12px',
-                    background: isLowMargin ? 'color-mix(in srgb, var(--danger) 6%, transparent)' : themeVars.cardBg, padding: '12px', borderRadius: '10px', border: `1px solid ${isLowMargin ? 'color-mix(in srgb, var(--danger) 25%, transparent)' : themeVars.border}`
+                    background: isLowMargin ? 'color-mix(in srgb, var(--danger) 6%, transparent)' : 'var(--surface)', padding: '12px', borderRadius: '16px', border: `1px solid ${isLowMargin ? 'color-mix(in srgb, var(--danger) 25%, transparent)' : 'var(--border)'}`
                   }}>
                     <div style={{
-                      fontSize: '18px', fontWeight: '900', color: idx === 0 ? 'var(--danger)' : idx === 1 ? 'var(--amber)' : idx === 2 ? 'var(--success)' : 'var(--text-3)',
+                      fontSize: '16px', fontWeight: '900', color: idx === 0 ? 'var(--danger)' : idx === 1 ? 'var(--amber)' : idx === 2 ? 'var(--success)' : 'var(--text-3)',
                       width: '24px', textAlign: 'center'
                     }}>
                       {idx + 1}
                     </div>
-                    <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold' }}>
+                    <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold', fontSize: '14px' }}>
                       {item.name}
                     </div>
                     {marginRate !== null && marginRate !== undefined && (
@@ -196,7 +188,7 @@ export default function TopRankingTab() {
                         마진 {marginRate.toFixed(1)}%
                       </div>
                     )}
-                    <div style={{ fontWeight: '900', color: 'var(--accent)' }}>
+                    <div style={{ fontWeight: '900', color: 'var(--accent)', fontSize: '14px' }}>
                       {item.qty}개
                     </div>
                   </li>
@@ -204,7 +196,7 @@ export default function TopRankingTab() {
                 })}
               </ul>
             ) : (
-              <div style={{ padding: '20px', textAlign: 'center', color: 'gray', fontSize: '14px', background: themeVars.cardBg, borderRadius: '10px' }}>
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '14px', background: 'var(--surface)', borderRadius: '16px' }}>
                 이 달에는 판매 기록이 없습니다.
               </div>
             )}
@@ -213,7 +205,7 @@ export default function TopRankingTab() {
 
         {/* 선택한 달에 아무 데이터도 없을 경우 */}
         {Object.keys(currentData).length === 0 && (
-          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: themeVars.textMuted, background: themeVars.bg, borderRadius: '12px', border: `1px dashed ${themeVars.border}` }}>
+          <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: 'var(--text-3)', background: 'var(--panel)', borderRadius: '16px', border: '1px dashed var(--border)' }}>
             해당 월에 수집된 E상인 매출 데이터가 없습니다.
           </div>
         )}

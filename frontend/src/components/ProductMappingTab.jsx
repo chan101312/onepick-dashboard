@@ -109,10 +109,10 @@ export default function ProductMappingTab() {
       </p>
 
       <div style={{
-        background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)',
+        background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--border)',
         padding: '16px', marginBottom: '20px',
       }}>
-        <div style={{ fontWeight: 700, marginBottom: '10px', color: 'var(--text)' }}><Emoji>➕</Emoji> 새 매핑 등록</div>
+        <div style={{ fontSize: '16px', fontWeight: 700, marginBottom: '10px', color: 'var(--text)' }}><Emoji>➕</Emoji> 새 매핑 등록</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
           <input
             type="text"
@@ -121,7 +121,7 @@ export default function ProductMappingTab() {
             onChange={(e) => setNewEsangin(e.target.value)}
             style={{
               padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-              background: 'rgba(255,255,255,0.04)', color: 'var(--text)', fontSize: '14px', outline: 'none',
+              background: 'var(--surface-2)', color: 'var(--text)', fontSize: '14px', outline: 'none',
             }}
           />
           <input
@@ -131,7 +131,7 @@ export default function ProductMappingTab() {
             onChange={(e) => setNewAlias(e.target.value)}
             style={{
               padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-              background: 'rgba(255,255,255,0.04)', color: 'var(--text)', fontSize: '14px', outline: 'none',
+              background: 'var(--surface-2)', color: 'var(--text)', fontSize: '14px', outline: 'none',
             }}
           />
           <button onClick={addMapping} className="esangin-btn">등록</button>
@@ -140,7 +140,7 @@ export default function ProductMappingTab() {
 
       {errorMsg && (
         <div style={{
-          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '16px',
           background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
           color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
@@ -155,7 +155,7 @@ export default function ProductMappingTab() {
         onChange={(e) => setSearch(e.target.value)}
         style={{
           width: '100%', maxWidth: '400px', padding: '10px 12px', borderRadius: '8px',
-          border: '1px solid var(--border)', background: 'rgba(255,255,255,0.04)',
+          border: '1px solid var(--border)', background: 'var(--surface-2)',
           color: 'var(--text)', fontSize: '14px', outline: 'none', marginBottom: '16px',
         }}
       />
@@ -173,21 +173,19 @@ export default function ProductMappingTab() {
           {filtered.map((m) => (
             <div
               key={m.esangin_core_name}
+              className="ui-card"
               style={{
                 background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: '10px', padding: '14px 16px',
+                borderRadius: '16px', padding: '14px 16px',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)' }}>
+                <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>
                   {m.esangin_core_name}
                 </span>
                 <button
                   onClick={() => deleteEntry(m.esangin_core_name)}
-                  style={{
-                    background: 'transparent', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5',
-                    borderRadius: '6px', padding: '4px 10px', fontSize: '12px', cursor: 'pointer',
-                  }}
+                  className="tab-icon-btn danger"
                 >
                   전체 삭제
                 </button>
@@ -201,10 +199,11 @@ export default function ProductMappingTab() {
                       background: 'var(--surface-2)', borderRadius: '8px', padding: '8px 12px',
                     }}
                   >
-                    <span style={{ fontSize: '13px', color: 'var(--text-2, var(--text-3))' }}>{alias}</span>
+                    <span style={{ fontSize: '13px', color: 'var(--text-2)' }}>{alias}</span>
                     <button
                       onClick={() => deleteAlias(m.esangin_core_name, alias)}
-                      style={{ background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
+                      className="tab-icon-btn"
+                      style={{ border: 'none', padding: '2px 6px', lineHeight: 1 }}
                       title="이 별칭만 삭제"
                     >
                       <Emoji>✕</Emoji>

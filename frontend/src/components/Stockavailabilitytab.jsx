@@ -3,9 +3,9 @@ import { API_BASE } from '../apiBase';
 import { Emoji } from './Icons';
 
 const AVAILABILITY_CONFIG = {
-  out: { label: '품절', accent: '#f87171' },
-  not_found: { label: 'E상인 미등록', accent: '#facc15' },
-  low: { label: '재고 부족', accent: '#fb923c' },
+  out: { label: '품절', accent: 'var(--danger)' },
+  not_found: { label: 'E상인 미등록', accent: 'var(--amber)' },
+  low: { label: '재고 부족', accent: 'color-mix(in srgb, var(--amber) 45%, var(--danger) 55%)' },
   sufficient: { label: '충분', accent: 'var(--success)' },
 };
 
@@ -67,7 +67,7 @@ export default function StockAvailabilityTab() {
           onChange={(e) => setDate(e.target.value)}
           style={{
             padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-            background: 'rgba(255,255,255,0.04)', color: 'var(--text)', fontSize: '14px',
+            background: 'var(--surface-2)', color: 'var(--text)', fontSize: '14px',
           }}
         />
         <button onClick={handleSearch} className="esangin-btn" disabled={isLoading}>
@@ -78,8 +78,8 @@ export default function StockAvailabilityTab() {
             key={ch}
             style={{
               fontSize: '12px', padding: '4px 10px', borderRadius: '999px',
-              background: note.status === 'ok' ? 'color-mix(in srgb, var(--success) 12%, transparent)' : 'rgba(248,113,113,0.12)',
-              color: note.status === 'ok' ? 'var(--success)' : '#f87171', fontWeight: 600,
+              background: note.status === 'ok' ? 'color-mix(in srgb, var(--success) 12%, transparent)' : 'color-mix(in srgb, var(--danger) 12%, transparent)',
+              color: note.status === 'ok' ? 'var(--success)' : 'var(--danger)', fontWeight: 600,
             }}
           >
             {ch}: {note.status === 'ok' ? `주문 ${note.order_count}건` : (note.message || '오류')}
@@ -89,7 +89,7 @@ export default function StockAvailabilityTab() {
 
       {errorMsg && (
         <div style={{
-          marginBottom: '16px', padding: '12px 16px', borderRadius: '10px',
+          marginBottom: '16px', padding: '12px 16px', borderRadius: '16px',
           background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
           color: 'var(--amber)', fontSize: '13px', fontWeight: 600,
         }}>
@@ -142,8 +142,9 @@ export default function StockAvailabilityTab() {
                 style={{
                   display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
                   background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderLeft: `3px solid ${cfg.accent}`, borderRadius: '10px', padding: '12px 16px',
+                  borderLeft: `3px solid ${cfg.accent}`, borderRadius: '16px', padding: '12px 16px',
                 }}
+                className="ui-card"
               >
                 <span style={{
                   fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '999px',

@@ -5,9 +5,9 @@ import Pagination from './Pagination';
 import { Emoji, EmojiText } from './Icons';
 
 const URGENCY_CONFIG = {
-  urgent: { icon: '●', label: '즉시 발주 필요', accent: '#f87171', text: '#e5e7eb' },
-  warning: { icon: '●', label: '발주 준비하세요', accent: '#fb923c', text: '#e5e7eb' },
-  notice: { icon: '●', label: '발주 예정 확인', accent: '#facc15', text: '#e5e7eb' },
+  urgent: { icon: '●', label: '즉시 발주 필요', accent: 'var(--danger)', text: 'var(--text)' },
+  warning: { icon: '●', label: '발주 준비하세요', accent: 'color-mix(in srgb, var(--amber) 45%, var(--danger) 55%)', text: 'var(--text)' },
+  notice: { icon: '●', label: '발주 예정 확인', accent: 'var(--amber)', text: 'var(--text)' },
 };
 const CARD_BG = 'var(--surface)';
 const CARD_BORDER = 'var(--border)';
@@ -342,8 +342,8 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
               style={{
                 padding: '8px 16px', borderRadius: '999px', fontSize: '13px', cursor: 'pointer',
                 border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: active ? 'rgba(96,165,250,0.18)' : 'transparent',
-                color: active ? '#93c5fd' : 'var(--text-3)',
+                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-3)',
                 fontWeight: active ? 700 : 400,
               }}
             >
@@ -414,38 +414,42 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       >
         <button
           onClick={allShownSelected ? deselectAllShown : selectAllShown}
+          className="tab-icon-btn"
           style={{
-            padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
-            background: allShownSelected ? 'color-mix(in srgb, var(--accent) 25%, transparent)' : 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px',
+            border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)',
+            background: allShownSelected ? 'color-mix(in srgb, var(--accent) 25%, transparent)' : 'transparent', color: 'var(--accent)',
           }}
         >
           {allShownSelected ? '현재 페이지 선택해제' : '현재 페이지 전체선택'}
         </button>
-        <span style={{ color: '#93c5fd', fontSize: '13px' }}>선택된 상품 {selectedList.length}개</span>
+        <span style={{ color: 'var(--accent)', fontSize: '13px' }}>선택된 상품 {selectedList.length}개</span>
         {selectedList.length > 0 && (
           <>
             <button
               onClick={() => setSelectedOpen((v) => !v)}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
+              className="tab-icon-btn"
+              style={{ border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', color: 'var(--accent)' }}
             >
               선택 목록 {selectedOpen ? '접기' : '펼치기'}
             </button>
             <button
               onClick={copySelectedList}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', background: 'transparent', color: '#93c5fd', cursor: 'pointer', fontSize: '13px' }}
+              className="tab-icon-btn"
+              style={{ border: '1px solid color-mix(in srgb, var(--accent) 50%, transparent)', color: 'var(--accent)' }}
             >
               목록 복사
             </button>
             <button
               onClick={markSelectedOnDemand}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(250,204,21,0.5)', background: 'transparent', color: '#facc15', cursor: 'pointer', fontSize: '13px' }}
+              className="tab-icon-btn"
+              style={{ border: '1px solid color-mix(in srgb, var(--amber) 50%, transparent)', color: 'var(--amber)' }}
               title="재고를 미리 안 쌓아두고 주문 시 매입하는 상품 - 등록하면 재발주 알림에서 제외됩니다"
             >
               <Emoji>🍢</Emoji> 당일매입형으로 등록
             </button>
             <button
               onClick={clearSelection}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid rgba(239,68,68,0.5)', background: 'transparent', color: '#fca5a5', cursor: 'pointer', fontSize: '13px' }}
+              className="tab-icon-btn danger"
             >
               전체 해제
             </button>
@@ -482,7 +486,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
         {shown.map((alert) => {
           const cfg = URGENCY_CONFIG[alert.urgency] || URGENCY_CONFIG.notice;
           return (
@@ -491,9 +495,10 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
               style={{
                 display: 'flex', flexDirection: 'column', gap: '10px',
                 background: CARD_BG, border: '1px solid var(--border)',
-                borderTop: `3px solid ${cfg.accent}`, borderRadius: '10px',
+                borderTop: `3px solid ${cfg.accent}`, borderRadius: '16px',
                 padding: '14px 16px',
               }}
+              className="ui-card"
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -526,7 +531,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
               </div>
 
               <div>
-                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35 }}>
                   {alert.product_name}
                 </div>
                 {alert.spec && (
@@ -559,11 +564,8 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
 
               <button
                 onClick={() => handleDismiss(alert)}
-                style={{
-                  padding: '8px 14px', borderRadius: '8px', width: '100%',
-                  border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)',
-                  fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                }}
+                className="tab-icon-btn"
+                style={{ width: '100%', textAlign: 'center', fontWeight: 600 }}
               >
                 발주 완료
               </button>

@@ -4,9 +4,9 @@ import Pagination from './Pagination';
 import { Emoji } from './Icons';
 
 const PAGE_SIZE = 20;
-const CARD_BG = 'rgba(139, 92, 246, 0.12)';
-const CARD_BORDER = '#8b5cf6';
-const CARD_TEXT = '#7c3aed';
+const CARD_BG = 'color-mix(in srgb, var(--accent) 12%, transparent)';
+const CARD_BORDER = 'var(--accent)';
+const CARD_TEXT = 'var(--accent)';
 
 export default function NewPopularTab() {
   const [items, setItems] = useState([]);

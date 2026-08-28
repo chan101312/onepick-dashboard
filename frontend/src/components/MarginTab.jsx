@@ -3,6 +3,76 @@ import { API_BASE } from '../apiBase';
 import { Emoji, EmojiText } from './Icons';
 import Pagination from './Pagination';
 
+// ===== 상품군 그룹 + 배수 자동계산 (순수 헬퍼 - 컴포넌트 밖) =====
+// 지금은 매입가에만 배수를 적용한다. 나중에 마진/운송비 등으로 넓힐 때는
+// 이 배열에 { field: 저장 컬럼명, autoFlag: 자동계산 여부 컬럼명 } 항목만 추가하면 된다.
+const MULTIPLIER_FIELDS = [{ field: '매입', autoFlag: '매입_자동계산' }];
+// 표에 편집 셀로 노출하지 않는 그룹 관리용 컬럼 (모달/배지에서만 다룬다)
+const GROUP_META_COLS = ['행ID', '그룹ID', '기준행', '배수', '매입_자동계산'];
+
+const genRowId = () => (typeof crypto !== 'undefined' && crypto.randomUUID
+  ? crypto.randomUUID()
+  : `r${Date.now()}${Math.random().toString(36).slice(2)}`);
+
+// CSV를 왕복하면 불리언이 "True"/"" 같은 문자열이 되기도 해서 관대하게 해석한다.
+const asBool = (v) => v === true || v === 1 || v === 'TRUE' || v === 'True' || v === 'true' || v === '1';
+const asMultiplier = (v) => {
+  const n = Number(String(v ?? '').replace(/,/g, '').trim());
+  return Number.isFinite(n) && n > 0 ? n : 1;
+};
+const groupIdOf = (row) => {
+  const g = String((row && row['그룹ID']) ?? '').trim();
+  return g && g !== '0' ? g : '';
+};
+const isGrouped = (row) => !!groupIdOf(row);
+const isGroupBase = (row) => isGrouped(row) && asBool(row && row['기준행']);
+
+// 각 행에 그룹 관리 컬럼과 운송비 키가 항상 존재하도록 보정 (기존 값은 건드리지 않음)
+const normalizeRows = (rows) => (Array.isArray(rows) ? rows : []).map((row) => {
+  const r = { ...row };
+  if (r['운송비'] === undefined || r['운송비'] === null) r['운송비'] = 0;
+  if (!r['행ID']) r['행ID'] = genRowId();
+  if (r['그룹ID'] === undefined || r['그룹ID'] === null || r['그룹ID'] === 0 || r['그룹ID'] === '0') r['그룹ID'] = '';
+  if (r['기준행'] === undefined || r['기준행'] === null || r['기준행'] === 0) r['기준행'] = '';
+  if (r['배수'] === undefined || r['배수'] === null || r['배수'] === 0 || r['배수'] === '0') r['배수'] = '';
+  if (r['매입_자동계산'] === undefined || r['매입_자동계산'] === null || r['매입_자동계산'] === 0) r['매입_자동계산'] = '';
+  return r;
+});
+
+// 기준행 값 × 배수를 자동계산이 켜진 필드에 반영한 새 배열을 반환한다.
+// 자동계산 꺼진 행 / 기준행 / 그룹 없는 행 / 기준행을 못 찾은 그룹은 그대로 둔다.
+const applyGroupMultipliers = (rows) => {
+  if (!Array.isArray(rows)) return [];
+  const baseByGroup = {};
+  rows.forEach((row) => {
+    if (isGroupBase(row)) {
+      const g = groupIdOf(row);
+      if (!(g in baseByGroup)) baseByGroup[g] = row; // 중복 기준행 방어: 첫 번째만 사용
+    }
+  });
+  return rows.map((row) => {
+    if (!isGrouped(row) || isGroupBase(row)) return row;
+    const base = baseByGroup[groupIdOf(row)];
+    if (!base) return row;
+    const mult = asMultiplier(row['배수']);
+    let next = row;
+    MULTIPLIER_FIELDS.forEach(({ field, autoFlag }) => {
+      if (!asBool(row[autoFlag])) return;
+      const baseVal = Number(String(base[field] ?? '').replace(/,/g, '').trim()) || 0;
+      const computed = Math.round(baseVal * mult);
+      if (next[field] !== computed) next = { ...next, [field]: computed };
+    });
+    return next;
+  });
+};
+
+// 특정 셀이 "배수 자동계산으로 잠긴" 상태인지 (기준행 아님 + 자동계산 ON)
+const isAutoCalcCell = (row, col) => {
+  const pure = String(col).split('.')[0];
+  const mf = MULTIPLIER_FIELDS.find((m) => m.field === pure);
+  return !!mf && isGrouped(row) && !isGroupBase(row) && asBool(row[mf.autoFlag]);
+};
+
 export default function MarginTab() {
   const [file, setFile] = useState(null);
   const [fullData, setFullData] = useState([]);
@@ -57,6 +127,12 @@ export default function MarginTab() {
   const [priceChangeSelected, setPriceChangeSelected] = useState({}); // { idx: boolean }
   const [isSyncingPrices, setIsSyncingPrices] = useState(false);
   const [priceSyncResults, setPriceSyncResults] = useState(null); // null이면 아직 반영 전, 배열이면 반영 결과 표시
+
+  // 👥 상품군 그룹 편집 모달
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  // groupDraft: { name, baseRowId, originalName, members: { [행ID]: { included, multiplier } } }
+  const [groupDraft, setGroupDraft] = useState(null);
+  const [groupMemberSearch, setGroupMemberSearch] = useState("");
 
   const fetchChannelLinks = () => {
     fetch(`${API_BASE}/api/channel-link`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
@@ -326,11 +402,14 @@ export default function MarginTab() {
       Object.keys(currentData[0]).forEach(key => {
         if (key.includes('상품명')) newRow[key] = "신규 상품명 입력";
         else if (key === '과세구분') newRow[key] = '과세';
+        else if (key === '행ID') newRow[key] = genRowId();
+        else if (GROUP_META_COLS.includes(key)) newRow[key] = ''; // 그룹 없음 상태로 시작
         else newRow[key] = 0;
       });
     } else {
       newRow['온라인 상품명'] = "신규 상품명 입력";
-      newRow['매입가'] = 0;
+      newRow['매입'] = 0;
+      newRow['운송비'] = 0;
       newRow['마진'] = 0;
       newRow['과세구분'] = '과세';
     }
@@ -534,13 +613,163 @@ export default function MarginTab() {
     setSummaryData(buildSummaryDataFromFull(recalculated));
   };
 
+  // 그룹 소속 행 전체에서 그룹 관련 필드를 비운다 (그룹 해제)
+  const clearGroupFields = (rows, gid) => rows.map((r) => (
+    groupIdOf(r) === gid
+      ? { ...r, '그룹ID': '', '기준행': '', '배수': '', '매입_자동계산': '' }
+      : r
+  ));
+
   const handleDeleteRow = (globalIndex) => {
-    if (window.confirm("정말로 이 상품(줄)을 삭제하시겠습니까?")) {
-      const newData = (fullData || []).filter((_, index) => index !== globalIndex);
-      const recalculated = recalcFullDataWithFees(newData, fees);
-      setFullData(recalculated);
-      setSummaryData(buildSummaryDataFromFull(recalculated));
+    const target = (fullData || [])[globalIndex];
+    const gid = groupIdOf(target);
+    const deletingBase = gid && asBool(target['기준행']);
+    const siblings = gid ? (fullData || []).filter((r, i) => i !== globalIndex && groupIdOf(r) === gid) : [];
+
+    const confirmMsg = deletingBase
+      ? `이 행은 '${gid}' 그룹의 기준 행입니다.\n삭제하면 그룹이 해제되고 나머지 ${siblings.length}개 행의 매입가 자동계산이 중단됩니다.\n계속하시겠습니까?`
+      : "정말로 이 상품(줄)을 삭제하시겠습니까?";
+    if (!window.confirm(confirmMsg)) return;
+
+    let newData = (fullData || []).filter((_, index) => index !== globalIndex);
+    let dissolvedMsg = null;
+
+    if (deletingBase) {
+      newData = clearGroupFields(newData, gid);
+      dissolvedMsg = `'${gid}' 그룹이 해제되었습니다. 나머지 행은 이제 매입가를 직접 입력하세요.`;
+    } else if (gid) {
+      // 비기준 행 삭제 후 구성 행이 1개 이하로 남으면 그룹은 의미가 없으므로 자동 해제
+      const remaining = newData.filter((r) => groupIdOf(r) === gid);
+      if (remaining.length <= 1) {
+        newData = clearGroupFields(newData, gid);
+        dissolvedMsg = `'${gid}' 그룹의 구성 행이 하나만 남아 그룹이 해제되었습니다. 남은 행은 매입가를 직접 입력하세요.`;
+      }
     }
+
+    const recalculated = recalcFullDataWithFees(newData, fees);
+    setFullData(recalculated);
+    setSummaryData(buildSummaryDataFromFull(recalculated));
+    if (dissolvedMsg) alert(dissolvedMsg);
+  };
+
+  // 개별 행에서 배수 자동계산을 켜고 끄는 토글 (예: 대량 구매 할인으로 단순 비례가 안 맞을 때)
+  const handleToggleRowAutoCalc = (globalIndex, flagCol) => {
+    const newData = [...(fullData || [])];
+    const cur = newData[globalIndex] || {};
+    newData[globalIndex] = { ...cur, [flagCol]: asBool(cur[flagCol]) ? '' : 'TRUE' };
+    const recalculated = recalcFullDataWithFees(newData, fees);
+    setFullData(recalculated);
+    setSummaryData(buildSummaryDataFromFull(recalculated));
+  };
+
+  // ===== 그룹 편집 모달 =====
+  const openGroupModal = (globalIndex) => {
+    const rows = fullData || [];
+    const row = rows[globalIndex];
+    if (!row) return;
+    const rowId = row['행ID'] || genRowId();
+    const gid = groupIdOf(row);
+    const members = {};
+    let baseRowId = rowId;
+    if (gid) {
+      rows.forEach((r) => {
+        if (groupIdOf(r) === gid) {
+          members[r['행ID']] = { included: true, multiplier: asMultiplier(r['배수']) };
+          if (asBool(r['기준행'])) baseRowId = r['행ID'];
+        }
+      });
+    } else {
+      members[rowId] = { included: true, multiplier: 1 };
+    }
+    setGroupDraft({ name: gid, originalName: gid, baseRowId, members });
+    setGroupMemberSearch("");
+    setGroupModalOpen(true);
+  };
+
+  const closeGroupModal = () => {
+    setGroupModalOpen(false);
+    setGroupDraft(null);
+    setGroupMemberSearch("");
+  };
+
+  const toggleGroupMember = (rowId) => {
+    setGroupDraft((d) => {
+      const cur = d.members[rowId] || { included: false, multiplier: 1 };
+      const nextIncluded = !cur.included;
+      const members = { ...d.members, [rowId]: { ...cur, included: nextIncluded } };
+      let baseRowId = d.baseRowId;
+      if (!nextIncluded && baseRowId === rowId) {
+        baseRowId = Object.keys(members).find((id) => members[id].included) || null;
+      }
+      return { ...d, members, baseRowId };
+    });
+  };
+
+  const setGroupMemberMultiplier = (rowId, value) => {
+    setGroupDraft((d) => ({
+      ...d,
+      members: { ...d.members, [rowId]: { ...(d.members[rowId] || { included: true }), included: true, multiplier: value } },
+    }));
+  };
+
+  const setGroupBase = (rowId) => {
+    setGroupDraft((d) => ({
+      ...d,
+      baseRowId: rowId,
+      members: { ...d.members, [rowId]: { ...(d.members[rowId] || { multiplier: 1 }), included: true } },
+    }));
+  };
+
+  const handleSaveGroup = () => {
+    const d = groupDraft;
+    if (!d) return;
+    const name = (d.name || '').trim();
+    const includedIds = Object.keys(d.members).filter((id) => d.members[id].included);
+    if (!name) { alert('그룹 이름을 입력해주세요.'); return; }
+    if (includedIds.length < 2) { alert('그룹에는 기준 행 + 최소 1개 행(총 2개 이상)이 필요합니다.'); return; }
+    if (!d.baseRowId || !includedIds.includes(d.baseRowId)) { alert('기준 행을 선택해주세요.'); return; }
+    if (name !== d.originalName && (fullData || []).some((r) => groupIdOf(r) === name)) {
+      alert(`'${name}' 그룹 이름이 이미 사용 중입니다. 다른 이름을 쓰거나 그 그룹을 편집하세요.`);
+      return;
+    }
+
+    const includedSet = new Set(includedIds);
+    const newData = (fullData || []).map((r) => {
+      const rid = r['행ID'];
+      const wasInThisGroup = d.originalName && groupIdOf(r) === d.originalName;
+      if (includedSet.has(rid)) {
+        const isBase = rid === d.baseRowId;
+        // 기존 멤버는 자동계산 on/off 설정을 유지, 새로 들어온 멤버는 자동계산 ON으로 시작
+        const prevAuto = wasInThisGroup ? asBool(r['매입_자동계산']) : true;
+        return {
+          ...r,
+          '그룹ID': name,
+          '기준행': isBase ? 'TRUE' : '',
+          '배수': isBase ? 1 : asMultiplier(d.members[rid].multiplier),
+          '매입_자동계산': isBase ? '' : (prevAuto ? 'TRUE' : ''),
+        };
+      }
+      if (wasInThisGroup) {
+        return { ...r, '그룹ID': '', '기준행': '', '배수': '', '매입_자동계산': '' };
+      }
+      return r;
+    });
+
+    const recalculated = recalcFullDataWithFees(newData, fees);
+    setFullData(recalculated);
+    setSummaryData(buildSummaryDataFromFull(recalculated));
+    closeGroupModal();
+  };
+
+  const handleUngroupFromModal = () => {
+    const d = groupDraft;
+    if (!d || !d.originalName) { closeGroupModal(); return; }
+    if (!window.confirm(`'${d.originalName}' 그룹을 해제할까요? 구성 행들의 매입가 자동계산이 중단됩니다.`)) return;
+    const newData = clearGroupFields(fullData || [], d.originalName);
+    const recalculated = recalcFullDataWithFees(newData, fees);
+    setFullData(recalculated);
+    setSummaryData(buildSummaryDataFromFull(recalculated));
+    closeGroupModal();
   };
 
   const parseNumber = (value) => {
@@ -599,6 +828,7 @@ export default function MarginTab() {
     return (
       parseNumber(row['매입'] || row['매입가']) +
       parseNumber(row['자재비']) +
+      parseNumber(row['운송비']) +
       parseNumber(row['마진']) +
       parseNumber(row['기타비용']) +
       parseNumber(row['날치알'])
@@ -634,7 +864,8 @@ export default function MarginTab() {
 
   const recalcFullDataWithFees = (sourceData, currentFees) => {
     if (!Array.isArray(sourceData)) return [];
-    return sourceData.map((row) => {
+    // 그룹 배수 자동계산 → 기존 수수료/판매가 계산 순서로 진행
+    return applyGroupMultipliers(normalizeRows(sourceData)).map((row) => {
       const commonCost = getCommonCost(row);
       const deliveryCost = getDeliveryCost(row);
       const taxType = row['과세구분'] || TAX_TYPE_TAXABLE;
@@ -742,17 +973,24 @@ export default function MarginTab() {
   const totalPages = Math.max(1, Math.ceil(filteredFullData.length / itemsPerPage));
 
   const getCleanColumns = (data) => {
-    if (!data || data.length === 0 || !data[0]) return ['온라인 상품명', '매입가', '마진']; 
+    if (!data || data.length === 0 || !data[0]) return ['온라인 상품명', '매입', '운송비', '마진'];
     const seen = new Set();
     const baseCols = [];
     Object.keys(data[0]).forEach(col => {
       if (col.includes('판매가') || col.includes('수수료')) return;
       if (['기타비용', '날치알', '과세구분'].includes(col)) return;
       const pureName = col.split('.')[0];
+      if (GROUP_META_COLS.includes(pureName)) return; // 그룹 관리 컬럼은 표에 노출하지 않음
       if (!seen.has(pureName)) { baseCols.push(col); seen.add(pureName); }
     });
+    // 운송비는 CSV 물리적 컬럼 순서와 무관하게 항상 자재비 바로 뒤(없으면 매입 뒤)에 표시한다.
+    const cols = baseCols.filter(c => c.split('.')[0] !== '운송비');
+    const anchor = cols.findIndex(c => c.split('.')[0] === '자재비');
+    const fallback = cols.findIndex(c => c.split('.')[0] === '매입');
+    const at = anchor >= 0 ? anchor + 1 : (fallback >= 0 ? fallback + 1 : cols.length);
+    cols.splice(at, 0, '운송비');
     // 🚫 롯데온 판매 중단: '롯데온 수수료' 컬럼 제외 (재개 시 배열에 다시 추가)
-    return [...baseCols, '네이버 수수료', '쿠팡 수수료', '배민 수수료', '식봄 수수료'];
+    return [...cols, '네이버 수수료', '쿠팡 수수료', '배민 수수료', '식봄 수수료'];
   };
 
   // 🚫 롯데온 판매 중단: '롯데온 판매가' 제외
@@ -876,7 +1114,7 @@ export default function MarginTab() {
         </div>
       </div>
       <p style={{ color: 'var(--text-3)', margin: '0 0 14px 0', fontSize: '12px', wordBreak: 'keep-all' }}>
-        기준 원가(매입+자재비+마진+택배비)에서 선택한 채널 수수료를 적용한 자동 추천 판매가를 표시합니다.
+        기준 원가(매입+자재비+운송비+마진+택배비)에서 선택한 채널 수수료를 적용한 자동 추천 판매가를 표시합니다.
       </p>
 
       <div style={{ marginBottom: '14px', padding: '14px', backgroundColor: 'var(--surface)', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid var(--border)' }}>
@@ -934,6 +1172,12 @@ export default function MarginTab() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
                             <button onClick={() => handleDeleteRow(globalIndex)} className="tab-icon-btn danger" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🗑️</Emoji> 삭제</button>
                             <button onClick={() => openLinkModal(productName)} className="tab-icon-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>🔗</Emoji> 채널 연결</button>
+                            <button onClick={() => openGroupModal(globalIndex)} className="tab-icon-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Emoji>👥</Emoji> {isGrouped(row) ? '그룹 편집' : '그룹 묶기'}</button>
+                            {isGrouped(row) && (
+                              <span title={`상품군: ${groupIdOf(row)}`} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '999px', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}>
+                                👥 {groupIdOf(row)} · {isGroupBase(row) ? '기준' : `×${asMultiplier(row['배수'])}`}
+                              </span>
+                            )}
                             {Object.keys(linkedChannels).length > 0 && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
                                 {Object.keys(CHANNEL_LABELS).filter(ch => linkedChannels[ch]).map(ch => (
@@ -961,9 +1205,30 @@ export default function MarginTab() {
                             );
                           }
                           const isNameCol = col.includes('상품명');
+                          const pureCol = col.split('.')[0];
+                          const autoLocked = isAutoCalcCell(row, col);
+                          const multiplierField = MULTIPLIER_FIELDS.find((m) => m.field === pureCol);
+                          const groupedNonBase = isGrouped(row) && !isGroupBase(row);
                           return (
                             <td key={col} style={{ padding: '5px', verticalAlign: 'top' }}>
-                              <input type="text" value={row[col] === null || row[col] === undefined ? "" : row[col]} onChange={(e) => handleCellChange(globalIndex, col, e.target.value)} style={{ width: '100%', padding: '10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', textAlign: isNameCol ? 'left' : 'right', boxSizing: 'border-box' }} />
+                              <input
+                                type="text"
+                                readOnly={autoLocked}
+                                value={row[col] === null || row[col] === undefined ? "" : row[col]}
+                                onChange={autoLocked ? undefined : (e) => handleCellChange(globalIndex, col, e.target.value)}
+                                title={autoLocked ? `그룹 기준가 × ${asMultiplier(row['배수'])} 자동계산됨` : undefined}
+                                style={{ width: '100%', padding: '10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: autoLocked ? 'var(--surface)' : 'var(--surface-2)', color: autoLocked ? 'var(--text-3)' : 'var(--text)', textAlign: isNameCol ? 'left' : 'right', boxSizing: 'border-box', cursor: autoLocked ? 'not-allowed' : 'text' }}
+                              />
+                              {multiplierField && groupedNonBase && (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', marginTop: '3px' }}>
+                                  {autoLocked && (
+                                    <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-3)', background: 'var(--surface-2)', borderRadius: '999px', padding: '1px 5px', border: '1px solid var(--border)' }}>자동계산됨</span>
+                                  )}
+                                  <button onClick={() => handleToggleRowAutoCalc(globalIndex, multiplierField.autoFlag)} className="tab-icon-btn" style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                    {autoLocked ? '수동전환' : '자동전환'}
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           );
                         })}
@@ -1274,6 +1539,68 @@ export default function MarginTab() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {groupModalOpen && groupDraft && (
+        <div onClick={closeGroupModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', width: '100%', maxWidth: '640px', maxHeight: '85vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ flexShrink: 0, padding: '20px 20px 14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}><Emoji>👥</Emoji> 상품군 그룹 {groupDraft.originalName ? '편집' : '만들기'}</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-3)', wordBreak: 'keep-all', lineHeight: 1.5 }}>
+                  기준 행의 매입가를 수정하면 나머지 행의 매입가가 배수만큼 자동 계산됩니다. 저장 후 상단 <strong>확인 및 저장</strong>을 눌러야 서버에 반영됩니다.
+                </p>
+              </div>
+              <button onClick={closeGroupModal} className="tab-icon-btn"><Emoji>✕</Emoji></button>
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '0 20px 12px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-3)' }}>그룹 이름 (상품군)</label>
+              <input type="text" value={groupDraft.name} onChange={(e) => setGroupDraft((d) => ({ ...d, name: e.target.value }))} placeholder="예: 시사모 열빙어 1kg" style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px', boxSizing: 'border-box' }} />
+              <input type="text" value={groupMemberSearch} onChange={(e) => setGroupMemberSearch(e.target.value)} placeholder="행 검색 (상품명)" style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px', boxSizing: 'border-box' }} />
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 20px 14px 20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {(fullData || []).map((r, i) => {
+                const rid = r['행ID'];
+                const pname = r['온라인 상품명'] || r['상품명'] || `(행 ${i + 1})`;
+                if (groupMemberSearch.trim() && !String(pname).toLowerCase().includes(groupMemberSearch.trim().toLowerCase())) return null;
+                const m = groupDraft.members[rid];
+                const included = !!(m && m.included);
+                const otherGroup = groupIdOf(r) && groupIdOf(r) !== groupDraft.originalName ? groupIdOf(r) : '';
+                const isBase = groupDraft.baseRowId === rid;
+                return (
+                  <div key={rid || i} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface-2)', borderRadius: '8px', padding: '8px 10px', opacity: otherGroup && !included ? 0.5 : 1 }}>
+                    <input type="checkbox" checked={included} disabled={!!otherGroup && !included} onChange={() => toggleGroupMember(rid)} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: '13px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {pname}
+                      {otherGroup && <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--text-3)' }}>({otherGroup} 그룹)</span>}
+                    </span>
+                    {included && (
+                      <>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                          <input type="radio" name="group-base" checked={isBase} onChange={() => setGroupBase(rid)} /> 기준
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>×</span>
+                          <input type="number" min="1" step="1" value={isBase ? 1 : (m.multiplier ?? 1)} disabled={isBase} onChange={(e) => setGroupMemberMultiplier(rid, e.target.value === '' ? '' : Number(e.target.value))} style={{ width: '54px', padding: '4px 6px', borderRadius: '6px', textAlign: 'right', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: '12px', opacity: isBase ? 0.5 : 1 }} />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ flexShrink: 0, padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
+              {groupDraft.originalName && (
+                <button onClick={handleUngroupFromModal} className="tab-icon-btn danger" style={{ flexShrink: 0 }}>그룹 해제</button>
+              )}
+              <button onClick={closeGroupModal} className="tab-icon-btn" style={{ flexShrink: 0, marginLeft: 'auto' }}>취소</button>
+              <button onClick={handleSaveGroup} className="tab-cta-btn" style={{ justifyContent: 'center', background: 'var(--accent)' }}>그룹 저장</button>
             </div>
           </div>
         </div>
