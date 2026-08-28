@@ -32,7 +32,22 @@ API로 조회한 실제 차감 수수료 기반)을 비교해, "예측 대비 �
   - `paySettleAmount` (결제액), **`totalPayCommissionAmount`** (실제 차감 수수료, 음수),
     `sellingInterlockCommissionAmount`, `freeInstallmentCommissionAmount`, `benefitSettleAmount`
   - `settleExpectAmount` (실수령 예상)
-- **수량 필드 없음** → §4에서 매출/판매가로 추정 처리
+- **수량 필드 없음** (전체 키 합집합 확인: `quantity`/`qty`/`cnt`/`수량` 계열 전무)
+  → §2.4 상품주문 상세 API로 실제 수량 병행 조회
+
+### 2.4 네이버 — 상품주문 상세 (실제 수량 조회)
+
+- `POST https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/query`
+- 헤더: settle/case와 동일 (`Authorization: Bearer <token>`)
+- 바디: `{"productOrderIds": [<settle/case 에서 모은 productOrderId 목록>]}` — 배치, 1회 최대 300개 (추정, 초과 시 분할)
+- 응답 `data[].productOrder` 주요 필드:
+  - **`quantity`** (실제 주문 수량), `initialQuantity`, `remainQuantity` (부분취소 후 잔여)
+  - `productOrderId` (settle/case 와 1:1 조인 키), `productId`, `originalProductId`, `sellerProductCode`
+  - `unitPrice`, `totalProductAmount`, `totalPaymentAmount`
+  - `productDiscountAmount`, `sellerBurdenStoreDiscountAmount`, `deliveryDiscountAmount` (할인/쿠폰 내역 — 참고)
+  - `productOrderStatus` (취소/반품 상태), `taxType`, `saleCommission`, `channelCommission` (수수료 교차검증용)
+- 검증: 7월 productOrderId 를 8월 말에 조회 성공 → 최소 2개월 lookback 가능. 기존 `naver_api.get_new_orders()` 가 이 엔드포인트를 이미 사용 중
+- **쿠폰/할인 주문에서 `매출 ÷ 판매가` 추정은 부정확**(라이브 확인: `productDiscountAmount` 존재 시 반올림 뒤집힘 가능) → 추정 폐기, 이 API의 `quantity` 를 사용
 
 ### 2.2 쿠팡 — 매출/정산 내역
 
@@ -92,10 +107,11 @@ API로 조회한 실제 차감 수수료 기반)을 비교해, "예측 대비 �
 - `실제수수료`
   - 네이버 = Σ `|totalPayCommissionAmount|`
   - 쿠팡 = Σ (`serviceFee` + `serviceFeeVat`)
-- `수량`
-  - 쿠팡 = Σ `items[].quantity` (실값)
-  - 네이버 = `round(실제매출 / online.csv["네이버 판매가"])` — **추정** (`qty_estimated=true`).
-    판매가 0/누락 시 `PROD_ORDER` 라인 수로 대체
+- `수량` (양쪽 다 실제값 사용, 추정 없음)
+  - 쿠팡 = Σ `items[].quantity` — `saleType == "REFUND"` 라인은 음수로 합산 (net 판매수량)
+  - 네이버 = §2.4 `product-orders/query` 의 `productOrder.quantity` 를 `productOrderId` 로 조인해 합산.
+    반품/취소 정산 라인(음수 `settleType`)에 해당하는 `productOrderId` 는 그 수량만큼 차감 (net).
+    조회 실패한 `productOrderId` 는 `qty_partial=true` 로 표시하고 그 라인은 수량 0 처리 + `warnings[]`
 
 `online.csv` 행에서:
 - `채널수수료추정율` = `online.csv["<채널> 수수료"] / online.csv["<채널> 판매가"]` (판매가 0이면 `null`)
@@ -152,14 +168,16 @@ app.include_router(fee_analysis_router)
   - `fee_cache_YYYY-MM.json` 읽어 반환
   - 없으면 `{"status": "error", "message": "아직 조회된 정산 데이터가 없습니다. '정산 갱신'을 눌러주세요."}`
 - `POST /api/fee-analysis/refresh` body `{"month": "YYYY-MM"}`
-  - 네이버 settle/case 일별 순회 + 쿠팡 revenue-history 페이지 순회 → 집계 → 매칭 → 계산
+  - 네이버 settle/case 일별 순회(~30콜) → productOrderId 수집 → `product-orders/query` 배치(~1–10콜)로 실제 수량 →
+    쿠팡 revenue-history 페이지 순회 → 집계 → 매칭 → 계산
   - `fee_cache_YYYY-MM.json` 저장 후 페이로드 반환
   - 동시 실행 방지: 모듈 레벨 `_refresh_lock`(threading.Lock) + `_in_progress` 플래그, 진행 중이면 `{"status":"error","message":"조회가 이미 진행 중입니다."}`
-  - 소요 ~15–30초 (동기 처리). 네이버 콜 간 `time.sleep(0.2)`, 실패한 날짜는 최대 1회 재시도 후 `warnings[]` 에 기록하고 계속
+  - 소요 ~20–40초 (동기 처리). 네이버 콜 간 `time.sleep(0.2)`, 실패한 날짜/배치는 최대 1회 재시도 후 `warnings[]` 에 기록하고 계속
 
 ### 6.2 내부 함수
 
 - `_fetch_naver_settle(month) -> list[dict]` — 일별 순회, elements 평탄화
+- `_fetch_naver_quantities(product_order_ids) -> dict[str, dict]` — `product-orders/query` 300개씩 분할 POST, `{productOrderId: {quantity, productOrderStatus, ...}}`
 - `_fetch_coupang_revenue(month) -> list[dict]` — nextToken 순회, items 평탄화
 - `_load_margin_rows() -> list[dict]` — `uploads/online.csv` (`pd.read_csv`, `clean_dataframe` 재사용 가능하면 재사용, 아니면 자체 로드)
 - `_load_channel_links() -> dict`
@@ -181,7 +199,7 @@ app.include_router(fee_analysis_router)
   },
   "rows": [
     { "product_name": "장터국수 우동국물1.8L X 6개", "channel": "naver",
-      "qty": 12, "qty_estimated": true,
+      "qty": 12, "qty_partial": false,
       "revenue": 894000, "cost": 0, "fixed_cost": 0,
       "estimated_fee": 26820, "actual_fee": 26844,
       "estimated_margin": 0, "actual_margin": 0,
@@ -203,11 +221,11 @@ app.include_router(fee_analysis_router)
 
 - 상태: `month` (기본 = 지난달 — 이번 달 정산은 미완), `data`, `loading`, `refreshing`
 - 마운트 / `month` 변경 시 `GET /api/fee-analysis?month=` 호출
-- **정산 갱신** 버튼 → `POST /api/fee-analysis/refresh` (스피너, 버튼 비활성, ~30초),
+- **정산 갱신** 버튼 → `POST /api/fee-analysis/refresh` (스피너, 버튼 비활성, ~20–40초),
   완료 후 재조회. `fetched_at` 을 "마지막 갱신: ..." 로 표시
 - **채널 요약 카드 2개** (네이버 / 쿠팡): 매출 / 실제 수수료 / 예측 수수료 / 실제 순마진,
   하단에 작게 "미매칭 매출·수수료"
-- **상품 테이블**: 상품명 | 채널 | 수량(추정 시 `~` 접두) | 매출 | 예측수수료 | 실제수수료 |
+- **상품 테이블**: 상품명 | 채널 | 수량(`qty_partial` 이면 `*` 표시) | 매출 | 예측수수료 | 실제수수료 |
   예측마진 | 실제마진 | 차이(₩) | 차이(%)
   - 정렬 가능, 기본 정렬 = `|diff_amount|` 내림차순
   - 색상: `diff_amount < 0` (예상보다 더 뗌) 빨강, `> 0` 초록
@@ -222,6 +240,7 @@ app.include_router(fee_analysis_router)
 
 - 캐시 없음 → 안내 문구 + 갱신 유도
 - refresh 중 네이버 일부 날짜 실패 → 그 날짜만 제외하고 진행, `warnings[]` 노출
+- `product-orders/query` 배치 일부 실패/누락 → 해당 `productOrderId` 라인 `qty_partial`, 수량 0, `warnings[]`
 - refresh 중 쿠팡 인증/서명 실패 → 해당 채널 0 처리 + `warnings[]`
 - `online.csv` 없음 → refresh는 정산 데이터만 채우고 전 행 `unmatched` 처리 + warning
 - 동시 refresh → 거절 메시지
@@ -237,10 +256,11 @@ app.include_router(fee_analysis_router)
 
 ## 10. 리스크 / 가정
 
-- 네이버 정산에 수량 없음 → `매출/판매가` 로 추정. 판매가 변동 이력이 있으면 수량·원가·고정비에 오차 (수수료 비교 자체는 율 방식이라 영향 없음)
+- 네이버 실제 수량은 `product-orders/query` 별도 호출로 확보(§2.4). lookback 한계는 최소 2개월 확인, 문서상 통상 1년 — 아주 오래된 월 조회 시 일부 `productOrderId` 누락 가능 → `qty_partial` 표시 + warning
+- 반품/부분취소 시 net 수량 산정: 음수 정산 라인의 `productOrderId` 수량 차감. `remainQuantity` 와 불일치할 수 있어 구현 시 실데이터로 한 번 대조 필요
 - 이름 fuzzy 매칭 오탐 가능 → `match_confidence` 표시 + 미매칭 우선 노출로 완화
 - `channel_link.json` 거의 비어있음 → 초기에는 대부분 이름 매칭에 의존
 - 정산 기준월 ≠ 판매월 (경계 주문 며칠 이동)
-- 네이버 30콜 rate limit 가능 → 콜 간 지연 + 실패일 재시도/경고
+- 네이버 40콜 내외 rate limit 가능 → 콜 간 지연 + 실패분 재시도/경고
 - VAT 포함/제외 가정(§4)이 실제 정산 정의와 다르면 절대 마진 값에 편차 — 차이(예측−실제 수수료)에는 영향 적음
 - 로컬 개발 환경은 네이버 커머스 토큰 발급이 안 됨(IP 등) → 백엔드 검증은 프로덕션 경유(SSH + venv)로 수행
