@@ -14,6 +14,7 @@ import StockReconcileTab from './components/StockReconcileTab'; // 💡 재고 �
 import StockAuditTab from './components/StockAuditTab'; // 💡 재고 실사 (수동)
 import DeadstockPromotionTab from './components/DeadstockPromotionTab'; // 💡 재고 처분 추천
 import SurgeChannelExpansionTab from './components/SurgeChannelExpansionTab'; // 💡 채널 확장 추천
+import FeeAnalysisTab from './components/FeeAnalysisTab'; // 💡 수수료 분석
 import { loadDismissed, signature } from './components/reorderAlertUtils';
 import { useTheme } from './ThemeContext.jsx';
 import { Emoji, Sun, Moon, Dot } from './components/Icons';
@@ -102,6 +103,7 @@ function App() {
           <section className="content">
             <div key={activeTab} className="tab-fade">
               {activeTab === 'margin' && <MarginTab />}
+              {activeTab === 'fee_analysis' && <FeeAnalysisTab />}
               {activeTab === 'ranking' && <TopRankingTab />}
               {activeTab === 'reorder_alerts' && <ReorderTabPage onUrgentCountChange={setReorderUrgentCount} />}
               {activeTab === 'todo_list' && <TodoListTab />}

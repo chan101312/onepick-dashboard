@@ -6,6 +6,7 @@ const FAVORITES_KEY = 'onepick_favorite_menus';
 
 export const NAV_ITEMS = [
   { key: 'margin', label: '마진 산출 장부', icon: '📊', group: 'sales' },
+  { key: 'fee_analysis', label: '수수료 분석', icon: '💸', group: 'sales' },
   { key: 'ranking', label: '플랫폼 TOP 5 랭킹', icon: '🏆', group: 'sales' },
   { key: 'sales_decline', label: '판매둔화', icon: '📉', group: 'sales' },
   { key: 'sales_surge', label: '판매급증', icon: '📈', group: 'sales' },
