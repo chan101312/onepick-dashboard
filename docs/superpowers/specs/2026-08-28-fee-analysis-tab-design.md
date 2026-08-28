@@ -20,9 +20,10 @@ API로 조회한 실제 차감 수수료 기반)을 비교해, "예측 대비 �
 - `GET https://api.commerce.naver.com/external/v1/pay-settle/settle/case`
 - 헤더: `Authorization: Bearer <token>` (`naver_api.get_access_token()`)
 - 파라미터:
-  - `periodType` = `SETTLE_CASEBYCASE_SETTLE_BASIS_DATE` (정산 기준일 기준)
-  - `searchDate` = `YYYY-MM-DD` (단일 일자, 하루씩 조회 → 월 조회 시 해당 월 일수만큼 반복)
+  - `periodType` = `SETTLE_CASEBYCASE_SETTLE_BASIS_DATE`
+  - `searchDate` = `YYYY-MM-DD` (단일 일자). 판매월 M 집계를 위해 **[M-01 … (M+1)-20] 범위를 하루씩 순회**(§5)
   - `pageNumber` / `pageSize` (settle/daily 응답 기준 기본 size 1000, 페이지네이션 존재 가정 → `pagination` 블록 없을 때까지 순회)
+  - 집계 시 `payDate` 가 M월인 행만 사용
 - 응답 `elements[]` 주요 필드:
   - `settleBasisDate`, `settleExpectDate`, `settleCompleteDate`, `payDate`
   - `orderId`, `productOrderId`, `productOrderType` (`PROD_ORDER` | `DELIVERY`)
@@ -55,9 +56,11 @@ API로 조회한 실제 차감 수수료 기반)을 비교해, "예측 대비 �
 - 인증: `coupang_api.generate_coupang_signature("GET", uri)` — 서명 대상 uri에 쿼리스트링 포함
 - 파라미터:
   - `vendorId` = `COUPANG_VENDOR_ID`
-  - `recognitionDateFrom` / `recognitionDateTo` = `YYYY-MM-DD`, 한 번에 ≤ 31일 (월 1콜로 커버)
+  - `recognitionDateFrom` / `recognitionDateTo` = `YYYY-MM-DD`, 한 번에 ≤ 31일.
+    판매월 M 집계 위해 **[M-01 … (M+1)-20]** 을 31일 이하로 2회 분할 조회(§5)
   - **`token` = `""` (빈 문자열, 첫 호출 필수)** — 생략/`0`/`1` 이면 400. 이후 `nextToken` 값으로 순회
   - `maxPerPage` = 50
+  - 집계 시 `saleDate` 가 M월인 행만 사용
 - 응답 `data[]`:
   - `orderId`, `saleType` (`SALE` | `REFUND`), `saleDate`, `recognitionDate`, `settlementDate`, `finalSettlementDate`
   - `deliveryFee { amount, fee, feeVat, feeRatio, settlementAmount, ... }`
@@ -138,14 +141,20 @@ VAT 가정: `paySettleAmount` / `saleAmount` 는 소비자 결제가(VAT 포함)
 - `실제 순마진 총액` = Σ `실제마진` (매칭분만 — 미매칭은 원가 데이터 없음)
 - 부가: `미매칭 매출` / `미매칭 수수료`
 
-## 5. 기간 기준 (검토 포인트)
+## 5. 기간 기준 — 판매(결제) 월 기준
 
-v1은 **선택한 월의 "정산 기준일"(네이버) / "매출인식일"(쿠팡) 기준으로 집계**한다.
-즉 "2026년 7월에 정산 확정된 분"이며, "7월에 판매된 분"과 며칠 경계 차이가 있다.
-UI 라벨에 "정산 확정 기준"을 명시한다.
+다른 탭(마진산출장부, 재고정합성)이 전부 판매/주문 시점 기준이므로 이 탭도 **선택한
+월에 결제/판매된 주문** 기준으로 집계한다. 정산일 기준이 아니다.
 
-대안(후속 고려): 조회 창을 `[M-01, (M+1)-15]` 로 넓히고 `payDate` / `saleDate` 로
-필터해 "판매 월" 기준으로 맞추기 — 네이버 호출 수가 ~45콜로 증가.
+구현: 정산 API의 조회 축은 정산일뿐이지만 응답에 판매일이 있으므로 —
+- 조회 창을 넓게: 네이버 `settle/case` 는 `searchDate` 를 **[M-01 … (M+1)-20]** 순회,
+  쿠팡 `revenue-history` 는 `recognitionDateFrom/To` 를 같은 창으로 (31일 초과이므로 2회 분할)
+- 응답 행을 **판매일이 M월인 것만** 남긴다: 네이버 `payDate` ∈ M, 쿠팡 `saleDate` ∈ M
+- 조회 창 밖(M+1 20일 이후)에서야 정산 확정되는 M월 초지연 건은 그 시점 갱신에서 누락 →
+  다음 달 재갱신 시 포함됨. `warnings[]` 에 "정산 미확정 추정 건 N건 제외 가능성" 안내
+
+비용: 네이버 `settle/case` ~50콜(일별) + `product-orders/query` 배치. 소요 ~30–60초.
+캐시가 있으므로 조회 자체는 수동 버튼 눌렀을 때만.
 
 ## 6. 백엔드 설계
 
@@ -168,11 +177,12 @@ app.include_router(fee_analysis_router)
   - `fee_cache_YYYY-MM.json` 읽어 반환
   - 없으면 `{"status": "error", "message": "아직 조회된 정산 데이터가 없습니다. '정산 갱신'을 눌러주세요."}`
 - `POST /api/fee-analysis/refresh` body `{"month": "YYYY-MM"}`
-  - 네이버 settle/case 일별 순회(~30콜) → productOrderId 수집 → `product-orders/query` 배치(~1–10콜)로 실제 수량 →
-    쿠팡 revenue-history 페이지 순회 → 집계 → 매칭 → 계산
+  - 네이버 settle/case `[M-01 … (M+1)-20]` 일별 순회(~50콜) → `payDate ∈ M` 필터 → productOrderId 수집 →
+    `product-orders/query` 배치(~1–10콜)로 실제 수량 →
+    쿠팡 revenue-history 같은 창 2분할 + 페이지 순회 → `saleDate ∈ M` 필터 → 집계 → 매칭 → 계산
   - `fee_cache_YYYY-MM.json` 저장 후 페이로드 반환
   - 동시 실행 방지: 모듈 레벨 `_refresh_lock`(threading.Lock) + `_in_progress` 플래그, 진행 중이면 `{"status":"error","message":"조회가 이미 진행 중입니다."}`
-  - 소요 ~20–40초 (동기 처리). 네이버 콜 간 `time.sleep(0.2)`, 실패한 날짜/배치는 최대 1회 재시도 후 `warnings[]` 에 기록하고 계속
+  - 소요 ~30–60초 (동기 처리). 네이버 콜 간 `time.sleep(0.2)`, 실패한 날짜/배치는 최대 1회 재시도 후 `warnings[]` 에 기록하고 계속
 
 ### 6.2 내부 함수
 
@@ -190,7 +200,7 @@ app.include_router(fee_analysis_router)
 {
   "month": "2026-07",
   "fetched_at": "2026-08-28T19:40:00+09:00",
-  "basis": "settlement",
+  "basis": "sale",
   "channels": {
     "naver":  { "revenue": 0, "actual_fee": 0, "estimated_fee": 0, "actual_margin": 0,
                 "unmatched_revenue": 0, "unmatched_fee": 0 },
@@ -219,8 +229,9 @@ app.include_router(fee_analysis_router)
 `frontend/src/components/FeeAnalysisTab.jsx` + `Sidebar.jsx` / `App.jsx` 탭 등록
 (key `fee_analysis`, 라벨 "수수료 분석", 아이콘 💸).
 
-- 상태: `month` (기본 = 지난달 — 이번 달 정산은 미완), `data`, `loading`, `refreshing`
+- 상태: `month` (기본 = 지난달 — 이번 달은 아직 미확정 정산이 많음), `data`, `loading`, `refreshing`
 - 마운트 / `month` 변경 시 `GET /api/fee-analysis?month=` 호출
+- 헤더에 "결제일 기준" 명시 (마진산출장부·재고정합성과 동일 시간축)
 - **정산 갱신** 버튼 → `POST /api/fee-analysis/refresh` (스피너, 버튼 비활성, ~20–40초),
   완료 후 재조회. `fetched_at` 을 "마지막 갱신: ..." 로 표시
 - **채널 요약 카드 2개** (네이버 / 쿠팡): 매출 / 실제 수수료 / 예측 수수료 / 실제 순마진,
@@ -252,7 +263,7 @@ app.include_router(fee_analysis_router)
 - 미매칭 상품 수동 매핑 UI (표시만)
 - 정산 데이터 자동/스케줄 갱신 (수동 버튼만)
 - 배송비 라인의 수수료 (상품 수수료에서 제외)
-- "판매 월" 기준 정확 정렬 (§5 대안) — v1은 정산 기준월
+- 초지연 정산 건 자동 보정 (다음 달 수동 재갱신으로 대응)
 
 ## 10. 리스크 / 가정
 
@@ -260,7 +271,7 @@ app.include_router(fee_analysis_router)
 - 반품/부분취소 시 net 수량 산정: 음수 정산 라인의 `productOrderId` 수량 차감. `remainQuantity` 와 불일치할 수 있어 구현 시 실데이터로 한 번 대조 필요
 - 이름 fuzzy 매칭 오탐 가능 → `match_confidence` 표시 + 미매칭 우선 노출로 완화
 - `channel_link.json` 거의 비어있음 → 초기에는 대부분 이름 매칭에 의존
-- 정산 기준월 ≠ 판매월 (경계 주문 며칠 이동)
-- 네이버 40콜 내외 rate limit 가능 → 콜 간 지연 + 실패분 재시도/경고
+- 판매월 기준(§5)이라 조회 창 밖에서 정산 확정되는 초지연 건은 해당 시점 갱신에서 누락 → 다음 달 재갱신 시 포함, `warnings[]` 안내. 이번 달·지난달은 재갱신 권장
+- 네이버 ~50콜 + 쿠팡 분할 조회 → rate limit 가능 → 콜 간 지연 + 실패분 재시도/경고
 - VAT 포함/제외 가정(§4)이 실제 정산 정의와 다르면 절대 마진 값에 편차 — 차이(예측−실제 수수료)에는 영향 적음
 - 로컬 개발 환경은 네이버 커머스 토큰 발급이 안 됨(IP 등) → 백엔드 검증은 프로덕션 경유(SSH + venv)로 수행
