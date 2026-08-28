@@ -96,3 +96,54 @@ def test_compute_row_diff_pct_none_on_zero_margin():
     assert r["estimated_margin"] == 0.0
     assert r["diff_pct"] is None
     assert r["qty_partial"] is True
+
+
+def test_aggregate_matches_and_summarizes():
+    margin_rows = [
+        {"온라인 상품명": "장터국수 우동국물1.8L X 6개", "매입": "50000", "자재비": "1000", "운송비": "0",
+         "네이버 수수료": "4110", "네이버 판매가": "74500",
+         "쿠팡 수수료": "8503", "쿠팡 판매가": "80200"},
+        {"온라인 상품명": "청어 6.5kg", "매입": "13000",
+         "쿠팡 수수료": "2783", "쿠팡 판매가": "25300"},
+    ]
+    links = {}
+    naver_lines = [
+        {"product_id": "9641317164", "product_name": "장터국수 우동국물1.8L X 6개 육수 대용량 업소용",
+         "revenue": 74500.0, "fee": 2237.0, "qty": 1.0, "qty_partial": False},
+    ]
+    coupang_lines = [
+        {"vendor_item_id": "90149646990", "product_id": "1", "product_name": "장터국수 우동국물1.8L X 6개 육수 대용량",
+         "revenue": 80200.0, "fee": 8600.0, "qty": 1.0},
+        {"vendor_item_id": "777", "product_id": "2", "product_name": "완전무관 상품 ZZZ",
+         "revenue": 30000.0, "fee": 3500.0, "qty": 1.0},
+    ]
+    out = fa._aggregate(naver_lines, coupang_lines, margin_rows, links)
+
+    assert len(out["rows"]) == 2                       # 네이버 1 + 쿠팡 1 (매칭)
+    assert len(out["unmatched"]) == 1
+    assert out["unmatched"][0]["product_name"] == "완전무관 상품 ZZZ"
+    assert out["unmatched"][0]["channel"] == "coupang"
+
+    nv = out["channels"]["naver"]
+    assert nv["revenue"] == 74500.0
+    assert nv["actual_fee"] == 2237.0
+    assert nv["estimated_fee"] > 0
+
+    cp = out["channels"]["coupang"]
+    assert cp["revenue"] == 110200.0                   # 80200 + 30000 (미매칭 포함)
+    assert cp["unmatched_revenue"] == 30000.0
+    assert cp["unmatched_fee"] == 3500.0
+
+    diffs = [abs(r["diff_amount"]) for r in out["rows"]]
+    assert diffs == sorted(diffs, reverse=True)        # |diff| 내림차순
+
+
+def test_aggregate_id_match_beats_name():
+    margin_rows = [{"온라인 상품명": "정답상품", "매입": "0", "네이버 수수료": "0", "네이버 판매가": "100"},
+                   {"온라인 상품명": "장터국수 우동국물", "매입": "0", "네이버 수수료": "0", "네이버 판매가": "100"}]
+    links = {"정답상품": {"naver": {"id": "9641317164"}}}
+    naver_lines = [{"product_id": "9641317164", "product_name": "장터국수 우동국물1.8L X 6개",
+                    "revenue": 1000.0, "fee": 30.0, "qty": 1.0, "qty_partial": False}]
+    out = fa._aggregate(naver_lines, [], margin_rows, links)
+    assert out["rows"][0]["product_name"] == "정답상품"
+    assert out["rows"][0]["match_method"] == "id"

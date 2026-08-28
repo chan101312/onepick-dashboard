@@ -103,3 +103,71 @@ def _compute_row(agg, margin_row, channel):
         "diff_amount": diff_amount,
         "diff_pct": diff_pct,
     }
+
+
+def _aggregate(naver_lines, coupang_lines, margin_rows, links):
+    link_idx = _build_link_index(links)
+    margin_idx = _build_margin_index(margin_rows)
+
+    buckets = {}   # (margin_name, channel) -> {"agg":{...}, "row":margin_row, "method":..., "conf":...}
+    unmatched = []
+    ch_totals = {
+        "naver": {"revenue": 0.0, "actual_fee": 0.0, "unmatched_revenue": 0.0, "unmatched_fee": 0.0},
+        "coupang": {"revenue": 0.0, "actual_fee": 0.0, "unmatched_revenue": 0.0, "unmatched_fee": 0.0},
+    }
+
+    def ingest(channel, settle_id, settle_name, revenue, fee, qty, qty_partial, spid, vid):
+        ch_totals[channel]["revenue"] += revenue
+        ch_totals[channel]["actual_fee"] += fee
+        row, method, conf = _match_product(settle_name, settle_id, channel, margin_idx, link_idx)
+        if row is None:
+            ch_totals[channel]["unmatched_revenue"] += revenue
+            ch_totals[channel]["unmatched_fee"] += fee
+            unmatched.append({
+                "product_name": settle_name, "channel": channel,
+                "settle_product_id": spid, "vendor_item_id": vid,
+                "revenue": revenue, "actual_fee": fee, "qty": qty,
+            })
+            return
+        key = (_margin_name_of(row), channel)
+        b = buckets.get(key)
+        if b is None:
+            b = {"agg": {"revenue": 0.0, "actual_fee": 0.0, "qty": 0.0, "qty_partial": False},
+                 "row": row, "method": method, "conf": conf}
+            buckets[key] = b
+        b["agg"]["revenue"] += revenue
+        b["agg"]["actual_fee"] += fee
+        b["agg"]["qty"] += qty
+        b["agg"]["qty_partial"] = b["agg"]["qty_partial"] or qty_partial
+        b["conf"] = min(b["conf"], conf)
+        if method == "id":
+            b["method"] = "id"
+
+    for ln in naver_lines:
+        ingest("naver", ln.get("product_id"), ln.get("product_name", ""),
+               ln.get("revenue", 0.0), ln.get("fee", 0.0), ln.get("qty", 0.0),
+               ln.get("qty_partial", False), ln.get("product_id"), None)
+    for ln in coupang_lines:
+        ingest("coupang", ln.get("vendor_item_id"), ln.get("product_name", ""),
+               ln.get("revenue", 0.0), ln.get("fee", 0.0), ln.get("qty", 0.0),
+               False, ln.get("product_id"), ln.get("vendor_item_id"))
+
+    rows = []
+    for (_name, channel), b in buckets.items():
+        r = _compute_row(b["agg"], b["row"], channel)
+        r["match_method"] = b["method"]
+        r["match_confidence"] = b["conf"]
+        rows.append(r)
+    rows.sort(key=lambda r: abs(r["diff_amount"]), reverse=True)
+
+    channels = {}
+    for ch in ("naver", "coupang"):
+        t = ch_totals[ch]
+        est = sum(r["estimated_fee"] for r in rows if r["channel"] == ch)
+        am = sum(r["actual_margin"] for r in rows if r["channel"] == ch)
+        channels[ch] = {
+            "revenue": t["revenue"], "actual_fee": t["actual_fee"],
+            "estimated_fee": est, "actual_margin": am,
+            "unmatched_revenue": t["unmatched_revenue"], "unmatched_fee": t["unmatched_fee"],
+        }
+    return {"channels": channels, "rows": rows, "unmatched": unmatched}
