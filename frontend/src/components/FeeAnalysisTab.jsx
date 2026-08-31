@@ -13,7 +13,11 @@ function lastMonthStr() {
 }
 
 const SORTS = {
-  diff_abs: (a, b) => Math.abs(b.diff_amount) - Math.abs(a.diff_amount),
+  diff_abs: (a, b) => {
+    // 부분수량(*) 행은 cost/fixed_cost가 0이라 마진이 무의미 → 항상 맨 아래로
+    if (a.qty_partial !== b.qty_partial) return a.qty_partial ? 1 : -1;
+    return Math.abs(b.diff_amount) - Math.abs(a.diff_amount);
+  },
   diff_asc: (a, b) => a.diff_amount - b.diff_amount,
   revenue: (a, b) => b.revenue - a.revenue,
   name: (a, b) => String(a.product_name).localeCompare(String(b.product_name)),
@@ -62,7 +66,7 @@ export default function FeeAnalysisTab() {
     setRefreshing(false);
   };
 
-  const rows = data ? [...data.rows].sort(SORTS[sortKey]) : [];
+  const rows = data ? [...(data.rows ?? [])].sort(SORTS[sortKey]) : [];
 
   return (
     <div className="responsive-container" translate="no" style={{ color: 'var(--text)' }}>

@@ -306,6 +306,184 @@ def test_build_naver_lines_joins_qty():
     assert l2["qty"] == 0.0 and l2["qty_partial"] is True     # 수량 조회 누락
 
 
+def test_parse_num_nan_and_inf_become_zero():
+    # 빈 숫자셀이 float('nan')으로 새어들어와도 0.0 (round(nan)/JSONResponse 500 차단)
+    assert fa._parse_num(float("nan")) == 0.0
+    assert fa._parse_num(float("inf")) == 0.0
+    assert fa._parse_num("nan") == 0.0
+    assert fa._parse_num("inf") == 0.0
+
+
+def test_build_naver_lines_sale_and_return_net_zero():
+    # 판매 후 전량 반품: 같은 productOrderId로 정산 라인 2개(판매/반품). 부호는 정산 라인에서 뽑아
+    # 두 라인이 revenue/fee/qty 모두 상쇄되어야 한다 (이익 조작 방지).
+    settle = [
+        {"product_order_id": "poX", "product_id": "p1", "product_name": "상품X",
+         "pay_settle_amount": 10000.0, "commission": -300.0, "settle_type": "SALE"},
+        {"product_order_id": "poX", "product_id": "p1", "product_name": "상품X",
+         "pay_settle_amount": -10000.0, "commission": 300.0, "settle_type": "RETURN"},
+    ]
+    qty_map = {"poX": {"quantity": 1.0, "status": "RETURNED"}}
+    lines = fa._build_naver_lines(settle, qty_map)
+    assert len(lines) == 2
+    assert sum(l["revenue"] for l in lines) == 0.0
+    assert sum(l["fee"] for l in lines) == 0.0
+    assert sum(l["qty"] for l in lines) == 0.0
+
+
+def test_build_naver_lines_uses_settle_type_not_amount_sign():
+    # 코드리뷰에서 지적된 케이스: 프로모션/수수료가 커서 진짜 판매인데도 정산액이 음수가 될 수
+    # 있다 — 이때 금액 부호만 보면 반품으로 잘못 뒤집힌다. settle_type이 "ORIGINAL"(정상판매)이면
+    # 금액이 음수여도 취소로 취급하면 안 된다.
+    settle = [
+        {"product_order_id": "poA", "product_id": "p1", "product_name": "적자프로모션상품",
+         "pay_settle_amount": -500.0, "commission": 8000.0, "settle_type": "QUICK_SETTLE_ORIGINAL"},
+    ]
+    qty_map = {"poA": {"quantity": 1.0, "status": "PURCHASE_DECIDED"}}
+    lines = fa._build_naver_lines(settle, qty_map)
+    assert lines[0]["qty"] == 1.0   # 반품으로 뒤집혀서 -1.0이 되면 안 됨
+
+    # 반대로 settle_type이 CANCEL 계열이면 정산액이 어쩌다 양수여도(이론상 케이스) 취소로 취급.
+    settle_cancel = [
+        {"product_order_id": "poB", "product_id": "p2", "product_name": "취소상품",
+         "pay_settle_amount": 100.0, "commission": -50.0, "settle_type": "QUICK_SETTLE_CANCEL"},
+    ]
+    qty_map_cancel = {"poB": {"quantity": 1.0, "status": "CANCELED"}}
+    lines_cancel = fa._build_naver_lines(settle_cancel, qty_map_cancel)
+    assert lines_cancel[0]["qty"] == -1.0
+
+    # settle_type이 아예 없는 경우(과거 데이터/필드 누락)에는 금액 부호로 폴백.
+    settle_no_type = [
+        {"product_order_id": "poC", "product_id": "p3", "product_name": "타입없음",
+         "pay_settle_amount": -200.0, "commission": 50.0, "settle_type": ""},
+    ]
+    qty_map_no_type = {"poC": {"quantity": 1.0, "status": "RETURNED"}}
+    lines_no_type = fa._build_naver_lines(settle_no_type, qty_map_no_type)
+    assert lines_no_type[0]["qty"] == -1.0
+
+
+def test_fetch_naver_settle_nan_amount_becomes_zero(monkeypatch):
+    # 네이버가 비정상 값(NaN 등)을 내려줘도 _parse_num을 거쳐 0.0으로 방어되는지 —
+    # allow_nan=False로 json.dump하는 캐시 저장이 죽지 않으려면 여기서부터 막혀야 한다.
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {
+                "elements": [{
+                    "productOrderId": "po1", "productOrderType": "PROD_ORDER",
+                    "payDate": "2026-07-01T00:00:00", "productId": "1", "productName": "상품",
+                    "paySettleAmount": float("nan"), "totalPayCommissionAmount": float("inf"),
+                    "settleType": "QUICK_SETTLE_ORIGINAL",
+                }],
+                "pagination": {"totalPages": 1},
+            }
+
+    from apis import naver_api
+    monkeypatch.setattr(naver_api, "get_access_token", lambda: "tok")
+    monkeypatch.setattr(naver_api, "_request", lambda *a, **k: _Resp())
+    monkeypatch.setattr(fa.time, "sleep", lambda *_: None)
+
+    warnings = []
+    out = fa._fetch_naver_settle("2026-07", warnings)
+    assert out[0]["pay_settle_amount"] == 0.0
+    assert out[0]["commission"] == 0.0
+
+
+def test_refresh_fee_analysis_nan_payload_returns_error_not_500(tmp_path, monkeypatch):
+    # allow_nan=False로 인한 ValueError가 raw 500이 아니라 정상 에러 응답으로 내려가는지.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(fa, "build_payload", lambda month: {"rows": [{"x": float("nan")}]})
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+    r = c.post("/api/fee-analysis/refresh", json={"month": "2026-07"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "error"
+    assert "NaN" in r.json()["message"] or "Infinity" in r.json()["message"] or "비정상" in r.json()["message"]
+
+
+def test_aggregate_excludes_qty_partial_from_channel_total():
+    margin_rows = [
+        {"온라인 상품명": "정상상품", "매입": "1000", "네이버 수수료": "100", "네이버 판매가": "2000"},
+        {"온라인 상품명": "부분상품", "매입": "1000", "네이버 수수료": "100", "네이버 판매가": "2000"},
+    ]
+    naver_lines = [
+        {"product_id": None, "product_name": "정상상품", "revenue": 2000.0, "fee": 100.0,
+         "qty": 1.0, "qty_partial": False},
+        {"product_id": None, "product_name": "부분상품", "revenue": 5000.0, "fee": 50.0,
+         "qty": 0.0, "qty_partial": True},
+    ]
+    out = fa._aggregate(naver_lines, [], margin_rows, {})
+    assert len(out["rows"]) == 2                       # 부분상품도 rows에는 남는다
+    nv = out["channels"]["naver"]
+    only_normal = 2000.0 - 1000.0 - 100.0 - 0.0        # 정상상품 actual_margin만
+    assert nv["actual_margin"] == only_normal
+    assert nv["estimated_fee"] == round(2000.0 * (100 / 2000))   # 부분상품 예측수수료 제외
+
+
+def test_valid_month_rejects_out_of_range():
+    assert fa._valid_month("2026-07") is True
+    assert fa._valid_month("2026-99") is False
+    assert fa._valid_month("2026-00") is False
+    assert fa._valid_month("2026-7") is False
+    assert fa._valid_month("../../x") is False
+
+
+def test_refresh_rejects_month_99(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+    r = c.post("/api/fee-analysis/refresh", json={"month": "2026-99"})
+    assert r.json()["status"] == "error"
+    assert "YYYY-MM" in r.json()["message"]
+
+
+def test_build_payload_warns_when_csv_missing(monkeypatch):
+    monkeypatch.setattr(fa, "_fetch_naver_settle", lambda m, w: [])
+    monkeypatch.setattr(fa, "_fetch_naver_quantities", lambda ids, w: {})
+    monkeypatch.setattr(fa, "_fetch_coupang_revenue", lambda m, w: [])
+    monkeypatch.setattr(fa, "_load_margin_rows", lambda: [])
+    monkeypatch.setattr(fa, "_load_channel_links", lambda: {})
+    p = fa.build_payload("2026-07")
+    assert any("online.csv" in w for w in p["warnings"])
+    assert any("다음 달에 다시 갱신" in w for w in p["warnings"])   # §5 상시 안내문
+    assert p["partial"] is True                                    # csv 누락 = 부분 데이터
+
+
+def test_build_payload_partial_false_on_clean_run(monkeypatch):
+    monkeypatch.setattr(fa, "_fetch_naver_settle", lambda m, w: [])
+    monkeypatch.setattr(fa, "_fetch_naver_quantities", lambda ids, w: {})
+    monkeypatch.setattr(fa, "_fetch_coupang_revenue", lambda m, w: [])
+    monkeypatch.setattr(fa, "_load_margin_rows", lambda: [{"온라인 상품명": "x", "매입": "0"}])
+    monkeypatch.setattr(fa, "_load_channel_links", lambda: {})
+    p = fa.build_payload("2026-07")
+    assert p["partial"] is False                                   # 조회 실패 없음
+    assert len(p["warnings"]) == 1                                  # §5 안내문만
+
+
+def test_fetch_naver_settle_skips_on_falsy_token(monkeypatch):
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "get_access_token", lambda: "")
+    warnings = []
+    out = fa._fetch_naver_settle("2026-07", warnings)
+    assert out == []
+    assert len(warnings) == 1 and "토큰" in warnings[0]
+
+
+def test_fetch_naver_quantities_skips_on_falsy_token(monkeypatch):
+    import apis.naver_api as nav
+    monkeypatch.setattr(nav, "get_access_token", lambda: None)
+    warnings = []
+    out = fa._fetch_naver_quantities(["po1"], warnings)
+    assert out == {}
+    assert len(warnings) == 1 and "토큰" in warnings[0]
+
+
 def test_endpoints_refresh_then_get(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)                                # 캐시파일을 임시 디렉터리에
     monkeypatch.setattr(fa, "_fetch_naver_settle", lambda m, w: [

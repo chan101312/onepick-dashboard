@@ -989,6 +989,18 @@ def test_endpoints_refresh_then_get(tmp_path, monkeypatch):
     r2 = c.get("/api/fee-analysis?month=2026-07")
     assert r2.json()["rows"][0]["product_name"] == "장터국수 우동국물"
     assert (tmp_path / "fee_cache_2026-07.json").exists()
+
+
+def test_get_fee_analysis_rejects_bad_month(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+    r = c.get("/api/fee-analysis?month=../../etc/passwd")
+    assert r.json()["status"] == "error"
+    assert "YYYY-MM" in r.json()["message"]
 ```
 
 - [ ] **Step 2: 실패 확인**
@@ -1061,24 +1073,32 @@ def build_payload(month):
     }
 
 
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")   # month 파라미터는 GET/POST 양쪽에서 검증 (경로 조작 방지)
+
+
 def _cache_path(month):
     return "fee_cache_%s.json" % month
 
 
 @router.get("/api/fee-analysis")
 def get_fee_analysis(month: str):
+    if not _MONTH_RE.match(month or ""):
+        return {"status": "error", "message": "month 형식은 YYYY-MM 이어야 합니다."}
     p = _cache_path(month)
     if not os.path.exists(p):
         return {"status": "error", "message": "아직 조회된 정산 데이터가 없습니다. '정산 갱신'을 눌러주세요."}
-    with open(p, "r", encoding="utf-8") as f:
-        return {"status": "success", **json.load(f)}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return {"status": "success", **json.load(f)}
+    except (OSError, ValueError):
+        return {"status": "error", "message": "캐시 파일을 읽을 수 없습니다. '정산 갱신'을 다시 눌러주세요."}
 
 
 @router.post("/api/fee-analysis/refresh")
 async def refresh_fee_analysis(request: Request):
     body = await request.json()
     month = (body or {}).get("month", "")
-    if not re.match(r"^\d{4}-\d{2}$", month):
+    if not _MONTH_RE.match(month or ""):
         return {"status": "error", "message": "month 형식은 YYYY-MM 이어야 합니다."}
     if not _refresh_lock.acquire(blocking=False):
         return {"status": "error", "message": "조회가 이미 진행 중입니다."}
