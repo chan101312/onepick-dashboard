@@ -34,7 +34,6 @@ import requests
 GITHUB_REPO = "chan101312/onepick-dashboard"
 GITHUB_REF = "feat/fee-analysis-tab"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
-GITHUB_RAW = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_REF}"
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 STATUS_FILE = os.path.join(PROJECT_ROOT, "prod_drift_status.json")
@@ -79,6 +78,18 @@ def _github_list_py_files(api_path):
     }
 
 
+def _github_fetch_raw(display_path):
+    """파일 내용을 raw.githubusercontent.com이 아니라 Contents API를 raw 미디어
+    타입으로 호출해서 받는다 — raw.githubusercontent.com은 Fastly CDN을 거치는데
+    엣지 노드별로 push 직후 캐시 갱신이 늦어서(특히 prod가 있는 리전에서) 방금
+    push한 내용을 못 보고 옛날 버전과 비교해 오탐하는 걸 실제로 겪었다. api.github.com은
+    캐시를 안 타서 항상 최신이다."""
+    url = f"{GITHUB_API}/{display_path}?ref={GITHUB_REF}"
+    res = requests.get(url, timeout=15, headers={"Accept": "application/vnd.github.raw"})
+    res.raise_for_status()
+    return res.text
+
+
 def _normalize(text):
     """줄바꿈 차이(CRLF vs LF)는 실제 코드 차이가 아니므로 비교 전에 통일한다 —
     Windows에서 git checkout 시 autocrlf로 CRLF 변환된 로컬 파일과 GitHub에
@@ -114,9 +125,7 @@ def _check_one_dir(local_dir, api_path, findings):
         with open(local_path, "r", encoding="utf-8", errors="replace") as f:
             local_text = _normalize(f.read())
 
-        remote_res = requests.get(f"{GITHUB_RAW}/{display_name}", timeout=15)
-        remote_res.raise_for_status()
-        remote_text = _normalize(remote_res.text)
+        remote_text = _normalize(_github_fetch_raw(display_name))
 
         if filename == "server.py":
             # server.py는 fee_analysis 관련 줄만 지우고 비교(패턴 기반 예외).
