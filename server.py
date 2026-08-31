@@ -8,7 +8,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.responses import JSONResponse
 from threading import Lock
 from urllib.parse import unquote
-from collections import defaultdict
+from collections import defaultdict, Counter
 from bs4 import BeautifulSoup
 import subprocess # 👈 맨 위에 추가
 import pandas as pd
@@ -1325,11 +1325,16 @@ def _match_esangin_name(channel_name, esangin_stock_by_name):
 def _fetch_esangin_sales_by_date(start_date_str, end_date_str=None):
     """saleticketlist에서 [start_date, end_date] 기간(YYYY-MM-DD, 포함) 동안 실제로 판매 입력된
     상품명을 날짜별 + 거래처(STLUTSangHo)별로 나눠서 가져온다:
-    {"YYYY-MM-DD": {"거래처명": {상품명, ...}, ...}, ...}.
+    {"YYYY-MM-DD": {"거래처명": Counter({상품명: 건수, ...}), ...}, ...}.
     거래처 구분 없이 전체를 하나로 합치면 다른 채널 매출이 우연히 같은 상품명이라 잘못
     매칭될 수 있어서, 호출부(order_reconcile)가 채널별로 정확한 거래처명만 골라 쓰도록
     거래처별로 쪼개서 반환한다. (주문일 다음날 처리되는 주문을 매칭할 때도 "주문일 vs
     주문일+1" 날짜별로 따로 봐야 해서 날짜도 쪼갠다.)
+    건수를 Counter로 세는 이유: 같은 상품이 하루에 여러 건 팔리면 E상인에도 그만큼 여러 번
+    입력되는데, 단순 set으로 담으면 중복 제거돼서 "그날 이 이름이 존재하는지"만 남고 "몇 건
+    있는지"가 사라진다 — 그러면 주문이 2건 이상이어도 그 중 1건만 매칭되고 나머지는 실제로는
+    전표가 있는데도 영원히 미확인으로 남는다(2026-08-31 "[미노] 보통맛떡볶이" 2주문/전표 4건
+    사례로 재발 확인). set이 아니라 Counter를 쓰는 게 이번이 처음이 아니라 원칙임 — 회귀 방지용.
     end_date_str 생략 시 start_date_str 하루만 조회.
     (토큰 매칭용으로 온전한 이름이 필요해서 핵심명이 아니라 원본 이름을 그대로 반환한다.)
     날짜 파싱 로직은 _fetch_month_over_month_sales와 동일한 방식(문자열 정리 후 앞 8자리 비교)을 재사용."""
@@ -1369,7 +1374,7 @@ def _fetch_esangin_sales_by_date(start_date_str, end_date_str=None):
                 continue
             vendor = safe_decode(r[2]).strip()
             day_key = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
-            entered_by_date.setdefault(day_key, {}).setdefault(vendor, set()).add(name)
+            entered_by_date.setdefault(day_key, {}).setdefault(vendor, Counter())[name] += 1
 
     return entered_by_date
 
@@ -1410,13 +1415,14 @@ def _find_mapped_esangin_core(channel_product_name):
 
 
 def _pool_match_by_core(pool, esangin_core_name):
-    """매핑된 esangin_core_name이 채널 전표 풀에 정확히 있으면 그대로, 없으면 핵심명
-    (대괄호 공급처 태그 제거)이 같은 항목을 찾아서 반환한다. 못 찾으면 None."""
-    if esangin_core_name in pool:
+    """매핑된 esangin_core_name이 채널 전표 풀(이름→남은 건수 Counter)에 정확히 있으면
+    그대로, 없으면 핵심명(대괄호 공급처 태그 제거)이 같은 항목을 찾아서 반환한다.
+    이미 다 소비돼서 건수가 0이 된 이름은 후보에서 제외한다. 못 찾으면 None."""
+    if pool.get(esangin_core_name, 0) > 0:
         return esangin_core_name
     target_core = _extract_core_name(esangin_core_name)
-    for n in pool:
-        if _extract_core_name(n) == target_core:
+    for n, count in pool.items():
+        if count > 0 and _extract_core_name(n) == target_core:
             return n
     return None
 
@@ -1492,14 +1498,17 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
         nonlocal matched_count
         vendor = CHANNEL_VENDOR_MAP.get(channel_label)
 
-        # 이 채널이 매칭에 쓸 수 있는 날짜별 E상인 풀 — 거래처(STLUTSangHo)로 이미 좁혀진 이름만
-        # 담는다. 한 번 매칭에 쓰인 이름은 풀에서 빼서(소비), 서로 다른 두 주문이 같은 E상인
-        # 전표 한 장에 중복으로 매칭되지 않게 한다. 채널별 mutable copy라 다른 채널엔 영향 없음.
+        # 이 채널이 매칭에 쓸 수 있는 날짜별 E상인 풀 — 거래처(STLUTSangHo)로 이미 좁혀진
+        # {이름: 남은 건수} Counter. 한 번 매칭에 쓰인 이름은 건수를 1 줄여서(소비), 같은
+        # 이름의 전표가 그날 여러 장 있으면 그 장 수만큼 서로 다른 주문에 매칭될 수 있게 한다
+        # (set으로 존재 여부만 담으면 하루에 같은 상품이 여러 건 팔려도 1건만 매칭되고 나머지는
+        # 전표가 있어도 영원히 미확인으로 남는다 — 2026-08-31 재발 확인된 회귀, Counter가 원칙).
+        # 채널별 mutable copy라 다른 채널엔 영향 없음.
         date_pools = {}
 
         def _pool_for(date_key):
             if date_key not in date_pools:
-                date_pools[date_key] = set(esangin_by_date.get(date_key, {}).get(vendor, set())) if vendor else set()
+                date_pools[date_key] = Counter(esangin_by_date.get(date_key, {}).get(vendor, {})) if vendor else Counter()
             return date_pools[date_key]
 
         def _pools_for_window(start_date_str):
@@ -1551,17 +1560,21 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                     continue
                 checked_any = True
 
-                candidate_names = set().union(*match_window) if match_window else set()
+                # 후보는 "그 날짜 풀에 남은 건수(count>0)"가 있는 이름만 — 이미 다른 주문에
+                # 다 소비된 이름(count==0)은 실제로는 더 이상 쓸 수 있는 전표가 없으므로 제외한다.
+                candidate_names = {n for pool in match_window for n, count in pool.items() if count > 0}
                 matched, matched_name, _match_confidence = _find_best_token_match(name, candidate_names)
                 if matched:
-                    # 소비: 매칭된 전표는 "이 주문 대조범위 안에서 실제로 그 이름이 들어있는
-                    # 가장 이른 날짜의 풀" 딱 하나에서만 뺀다. match_window 전체에서 지우면,
-                    # 반복 판매되는 상품처럼 여러 날짜에 각각 별도 전표가 있는 경우 이 주문과
-                    # 무관한 다른 날짜의 전표까지 함께 사라져서, 그 전표가 필요한 다른 주문이
-                    # (아직 처리되지 않았다면) 억울하게 미확인으로 잘못 뜬다.
+                    # 소비: 매칭된 전표는 "이 주문 대조범위 안에서 실제로 그 이름이 남아있는
+                    # 가장 이른 날짜의 풀" 딱 하나에서 건수만 1 줄인다(전체 삭제 아님 — 같은
+                    # 이름이 그날 여러 건이면 나머지는 다른 주문이 계속 쓸 수 있어야 한다).
+                    # match_window 전체에서 지우면, 반복 판매되는 상품처럼 여러 날짜에 각각
+                    # 별도 전표가 있는 경우 이 주문과 무관한 다른 날짜의 전표까지 함께 사라져서,
+                    # 그 전표가 필요한 다른 주문이 (아직 처리되지 않았다면) 억울하게 미확인으로
+                    # 잘못 뜬다.
                     for pool in match_window:
-                        if matched_name in pool:
-                            pool.discard(matched_name)
+                        if pool.get(matched_name, 0) > 0:
+                            pool[matched_name] -= 1
                             break
                     continue
 
@@ -1577,8 +1590,8 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                             hit_pool = pool
                             break
                     if hit:
-                        # 위와 같은 이유로 실제로 찾아낸 그 날짜의 풀에서만 소비한다.
-                        hit_pool.discard(hit)
+                        # 위와 같은 이유로 실제로 찾아낸 그 날짜의 풀에서만 건수를 소비한다.
+                        hit_pool[hit] -= 1
                         continue
 
                 core = _extract_core_name(name)
