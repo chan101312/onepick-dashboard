@@ -1547,10 +1547,15 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                 candidate_names = set().union(*match_window) if match_window else set()
                 matched, matched_name, _match_confidence = _find_best_token_match(name, candidate_names)
                 if matched:
-                    # 소비: 이 상품과 매칭된 E상인 전표는 실제로 들어있던 풀에서 빼서
-                    # 다른 상품 줄이 같은 전표에 또 매칭되지 않게 한다.
+                    # 소비: 매칭된 전표는 "이 주문 대조범위 안에서 실제로 그 이름이 들어있는
+                    # 가장 이른 날짜의 풀" 딱 하나에서만 뺀다. match_window 전체에서 지우면,
+                    # 반복 판매되는 상품처럼 여러 날짜에 각각 별도 전표가 있는 경우 이 주문과
+                    # 무관한 다른 날짜의 전표까지 함께 사라져서, 그 전표가 필요한 다른 주문이
+                    # (아직 처리되지 않았다면) 억울하게 미확인으로 잘못 뜬다.
                     for pool in match_window:
-                        pool.discard(matched_name)
+                        if matched_name in pool:
+                            pool.discard(matched_name)
+                            break
                     continue
 
                 # 토큰 유사도로 못 잡았으면, 사람이 예전에 확인해서 등록해둔 수동 매핑 사전을 확인한다
@@ -1558,13 +1563,15 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                 mapped_core = _find_mapped_esangin_core(name)
                 if mapped_core:
                     hit = None
+                    hit_pool = None
                     for pool in match_window:
                         hit = _pool_match_by_core(pool, mapped_core)
                         if hit:
+                            hit_pool = pool
                             break
                     if hit:
-                        for pool in match_window:
-                            pool.discard(hit)
+                        # 위와 같은 이유로 실제로 찾아낸 그 날짜의 풀에서만 소비한다.
+                        hit_pool.discard(hit)
                         continue
 
                 core = _extract_core_name(name)
