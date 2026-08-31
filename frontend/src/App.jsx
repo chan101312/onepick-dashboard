@@ -26,6 +26,23 @@ function App() {
   const { theme, toggleTheme } = useTheme();
 
   const [reorderUrgentCount, setReorderUrgentCount] = useState(0);
+  const [driftStatus, setDriftStatus] = useState(null);
+
+  // 💡 prod-git 코드 드리프트 감시 배너 — prod_drift_check.py가 cron으로 주기 확인한
+  // 결과를 그대로 보여준다. 앱 로드 시 한 번만 확인(실시간 폴링까지는 필요 없음 — cron
+  // 자체가 몇 시간 단위라 그보다 자주 물어봐야 의미가 없다).
+  useEffect(() => {
+    const checkDrift = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/prod-drift-status`, { headers: { 'ngrok-skip-browser-warning': '69420' } });
+        const result = await res.json();
+        if (result.status === 'success') setDriftStatus(result.data);
+      } catch {
+        // 조용히 무시 — 배너는 부가 정보라 실패해도 앱 동작엔 영향 없음
+      }
+    };
+    checkDrift();
+  }, []);
 
   useEffect(() => {
     const checkDbConnection = async () => {
@@ -99,6 +116,27 @@ function App() {
               </button>
             </div>
           </header>
+
+          {driftStatus && !driftStatus.never_run && !driftStatus.ok && (
+            <div style={{
+              margin: '0 24px 16px', padding: '12px 16px', borderRadius: '12px',
+              background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+              color: 'var(--danger)', fontSize: '13px', fontWeight: 600,
+            }}>
+              <Emoji>🚨</Emoji> prod 서버 코드가 git과 다릅니다 — 확인 시각: {driftStatus.checked_at || '알 수 없음'}
+              {driftStatus.error && <div>오류: {driftStatus.error}</div>}
+              {driftStatus.content_mismatch?.length > 0 && (
+                <div>내용 다름: {driftStatus.content_mismatch.join(', ')}</div>
+              )}
+              {driftStatus.missing_on_prod?.length > 0 && (
+                <div>prod에 없음: {driftStatus.missing_on_prod.join(', ')}</div>
+              )}
+              {driftStatus.prod_only_mystery_files?.length > 0 && (
+                <div>git에 없는 prod 전용 파일: {driftStatus.prod_only_mystery_files.join(', ')}</div>
+              )}
+            </div>
+          )}
 
           <section className="content">
             <div key={activeTab} className="tab-fade">

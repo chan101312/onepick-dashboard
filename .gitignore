@@ -20,6 +20,7 @@ checklist_items.json
 checklist_status.json
 todos.json
 bg_removed_outputs/
+prod_drift_status.json
 
 # OS/editor
 .DS_Store

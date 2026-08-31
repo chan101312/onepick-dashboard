@@ -477,6 +477,16 @@ def update_naver_seo(payload: NaverSeoRequest):
 @app.get("/api/health")
 def health(): return {"status": "success"}
 
+
+@app.get("/api/prod-drift-status")
+def get_prod_drift_status():
+    """prod_drift_check.py가 cron으로 주기 실행하며 남기는 결과 파일을 그대로 읽어서
+    돌려준다. 아직 cron이 한 번도 안 돌았거나(첫 배포 직후) 파일이 없으면, 프론트가
+    배너를 잘못 띄우지 않도록 "정상"으로 간주하는 안전한 기본값을 준다."""
+    default = {"checked_at": None, "ok": True, "never_run": True}
+    status = _load_json_file("prod_drift_status.json", default)
+    return {"status": "success", "data": status}
+
 @app.post("/api/naver/products/upload")
 async def upload_naver_product(
     mode: str = Form(...), channel_no: str = Form(""), name: str = Form(...), price: str = Form(...),
