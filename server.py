@@ -1451,7 +1451,7 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
     def _order_processing_started(channel_label, sample_item):
         """3시 마감 이후 주문은 결제완료(ACCEPT) 상태로 하루 넘게 머물다 다음날 처리되는 게 정상이라,
         아직 처리 시작 전(=결제완료 단계만)인 주문은 원래 E상인 입력이 없는 게 맞으므로 애초에
-        미입력 의심 대조 대상에서 제외한다. 상태 필드가 없는 채널(식봄 등)은 판단할 수 없으니
+        미입력 의심 대조 대상에서 제외한다. 상태 필드가 없는 채널은 판단할 수 없으니
         필터링하지 않고 그대로 포함한다."""
         if channel_label == "쿠팡":
             status = str(sample_item.get('주문상태', '')).strip()
@@ -1459,6 +1459,13 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
         if channel_label == "네이버":
             status = str(sample_item.get('주문상태', ''))
             return not status.startswith('🟢 신규주문') if status else True
+        if channel_label == "식봄":
+            # 식봄은 orderStatus가 PENDING_CONFIRMATION(신규주문/발송전)일 땐 아직 발송 준비도
+            # 안 된 단계라 E상인 입력 시점이 아니다. SHIPPED(배송중)/DELIVERED(배송완료)부터만
+            # 대조 대상으로 삼는다(실데이터 기준 이 세 값만 관측됨 — apis/sikbom_api.py의
+            # SIKBOM_SHIPPED_OR_LATER 참고).
+            status = str(sample_item.get('주문상태', '')).strip()
+            return status in sikbom_api.SIKBOM_SHIPPED_OR_LATER
         return True
 
     # E상인 대조 범위를 (target_end + 1일)과 오늘 중 더 늦은 날짜까지 늘려서, 주문일 이후
@@ -1578,6 +1585,7 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                 missing_items.append({
                     "product_name": name,
                     "qty": o.get('수량', 0),
+                    "receiver_name": o.get('수취인명', ''),
                     # 핵심명이 E상인 상품 카탈로그에 원래 있는 상품이면(그냥 오늘 입력만 깜빡) high,
                     # 카탈로그에서도 못 찾으면(이름 매칭 문제일 수도 있음) medium
                     "confidence": "high" if core in known_core_names else "medium",

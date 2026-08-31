@@ -284,6 +284,7 @@ export default function StockReconcileTab() {
                               <span key={j} style={{ display: 'block' }}>
                                 <span className="reorder-alert-text" style={{ fontSize: '13px' }}>[{it.product_name}]</span>
                                 <span className="reorder-alert-sub"> ×{it.qty}</span>
+                                {it.receiver_name && <span className="reorder-alert-sub"> - {it.receiver_name}</span>}
                                 <span className={`confidence-badge confidence-${it.confidence === 'high' ? 'high' : 'medium'}`} style={{ marginLeft: '6px' }}>
                                   {it.confidence === 'high' ? '높음' : '중간'}
                                 </span>

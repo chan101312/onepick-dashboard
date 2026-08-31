@@ -115,9 +115,13 @@ def get_coupang_orders(start_date=None, end_date=None):
         data = res.json()
         for order in data.get('data', []):
             ordered_at = order.get('orderedAt', '')[:16].replace("T", " ")
-            receiver = order.get('receiverName', '')
-            tel = order.get('receiverSafeNumber', '') or order.get('ordererSafeNumber', '')
-            addr = f"{order.get('receiverAddress1', '')} {order.get('receiverAddress2', '')}"
+            # v4→v5 갱신 과정에서 receiver 관련 필드가 order 바로 아래 평평한 키
+            # (receiverName 등)가 아니라 order['receiver'] 안에 중첩된 구조로 바뀌었는데
+            # 여기가 안 따라가서 지금까지 전부 빈 문자열만 나오고 있었다.
+            receiver_info = order.get('receiver', {}) or {}
+            receiver = receiver_info.get('name', '')
+            tel = receiver_info.get('safeNumber', '') or order.get('orderer', {}).get('safeNumber', '')
+            addr = f"{receiver_info.get('addr1', '')} {receiver_info.get('addr2', '')}"
             memo = order.get('shippingMemo', '')
 
             for item in order.get('orderItems', []):
@@ -125,6 +129,9 @@ def get_coupang_orders(start_date=None, end_date=None):
                 if key in seen_keys:
                     continue  # 같은 주문이 여러 status 조회에 중복으로 안 걸리게
                 seen_keys.add(key)
+                shipping_count = item.get('shippingCount', 0)
+                if shipping_count <= 0:
+                    continue  # 전량 취소된 품목(cancelCount로 전부 상쇄) — 대조 대상에서 제외
                 result.append({
                     "마켓": "쿠팡",
                     "결제일시": ordered_at,

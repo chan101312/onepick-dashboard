@@ -135,12 +135,19 @@ def get_new_orders(start_date=None, end_date=None):
     result = []
     if res_q.status_code == 200:
         for order in res_q.json().get('data', []):
+            # 응답이 order(결제/주문자 정보) / productOrder(품목/배송 정보) 두 개의 중첩
+            # 객체로 오는데, paymentDate/orderId는 order 안에, shippingAddress는
+            # productOrder 안에 있다. 예전 코드가 이걸 전부 order 바로 아래(및 최상위
+            # shippingAddress)에서 찾고 있어서 결제일시/주문번호/수취인명이 전부 빈 값이었다
+            # — 그 결과 날짜 필터(target_start<=결제일시<=target_end)를 항상 통과 못 해서
+            # 네이버 주문이 대조에 전혀 안 잡히고 있었다.
+            order_info = order.get('order', {})
             prod = order.get('productOrder', {})
-            ship = order.get('shippingAddress', {})
-            
+            ship = prod.get('shippingAddress', {})
+
             order_status = prod.get('productOrderStatus', '')
             place_status = prod.get('placeOrderStatus', '')
-            
+
             # 💡 [핵심 해결] 네이버의 겉 상태(order_status)와 속 상태(place_status)를 모두 검사하여 진짜 상태를 찾아냅니다!
             display_status = ""
             if order_status == 'PAYED':
@@ -150,13 +157,15 @@ def get_new_orders(start_date=None, end_date=None):
                     display_status = "🟢 신규주문 (결제완료)"
             elif order_status in ['DISPATCHED', 'DELIVERING']:
                 display_status = "🚚 배송중"
+            elif order_status == 'DELIVERED':
+                display_status = "✅ 배송완료"  # 위 화이트리스트에 없어서 취소/반품과 함께 잘못 제외되고 있었음
             else:
                 continue # 취소, 교환, 반품 건은 대시보드 발주 목록에서 제외
-            
+
             result.append({
                 "주문상태": display_status,
-                "결제일시": prod.get('paymentDate', '')[:16].replace("T", " "),
-                "주문번호": prod.get('orderId', ''),
+                "결제일시": order_info.get('paymentDate', '')[:16].replace("T", " "),
+                "주문번호": order_info.get('orderId', ''),
                 "상품주문번호": prod.get('productOrderId', ''),
                 "상품명": prod.get('productName', ''),
                 "옵션명": prod.get('productOption', ''),
