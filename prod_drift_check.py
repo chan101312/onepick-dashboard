@@ -7,18 +7,14 @@ bgremove.py 라우터 등록 — 전부 "prod에 SSH로 직접 수정하고 git�
 패턴으로 발생한 사고였다. 이 스크립트는 그 패턴을 사후에 고치는 게 아니라
 사고 나는 즉시(다음 cron 실행 시) 알아채기 위한 안전망이다.
 
-정답 소스: GitHub의 feat/fee-analysis-tab 브랜치 (2026-08-31 기준 이 브랜치가
-main보다 19개 커밋 앞서 있고, 그중 6개가 오늘 실제로 prod에 배포된 진짜 수정
-사항이라 main을 정답으로 쓰면 그 6개가 전부 오탐으로 잡힌다 — fee_analysis
-기능이 완성되어 main에 머지되고 나면 정답을 main으로 옮기는 걸 고려할 것).
+정답 소스: GitHub의 feat/fee-analysis-tab 브랜치 (main에 아직 안 머지됨 —
+머지되면 정답을 main으로 옮기는 걸 고려할 것).
 
-fee_analysis 기능은 아직 prod에 배포 전이라 예외 처리한다:
-  - fee_analysis.py 자체, 그리고 이미 "확인 끝나면 삭제해도 됨"이라고 자체
-    문서화된 1회성 디버그 스크립트(verify_coupang_option.py 등)는 비교 대상에서
-    완전히 제외한다.
-  - server.py 안에서는 "fee_analysis"라는 문자열이 들어간 줄만 양쪽에서 지우고
-    비교한다 — 고정된 줄 번호가 아니라 패턴 기반이라 fee_analysis 관련 작업이
-    계속 진행되며 그 부분 줄 수가 바뀌어도 오탐이 나지 않는다.
+fee_analysis 기능은 2026-09-01 Task 9로 prod에 실제 배포 완료 — 더 이상
+예외 처리 안 하고 다른 파일과 똑같이 감시한다(fee_analysis.py 제외 및
+server.py의 "fee_analysis" 줄 스킵 로직은 배포 완료 후 제거함). 여전히
+비교 대상에서 완전히 빼는 건 자체 문서화된 1회성 디버그 스크립트
+(verify_coupang_option.py 등, "확인 끝나면 삭제해도 됨"이라고 써있음)뿐이다.
 
 실행: cron으로 주기 실행 (crontab 설정은 이 프로젝트의 배포 문서 참고).
 출력: PROJECT_ROOT/prod_drift_status.json 에 결과를 기록한다. server.py의
@@ -40,9 +36,8 @@ STATUS_FILE = os.path.join(PROJECT_ROOT, "prod_drift_status.json")
 KST = timezone(timedelta(hours=9))
 
 # 완전히 비교 대상에서 빼는 파일 — git엔 있지만 prod에 없어도(또는 그 반대여도)
-# 정상인 것들. fee_analysis.py(미배포 기능)와 자체 선언된 1회성 디버그 스크립트.
+# 정상인 것들. 자체 선언된 1회성 디버그 스크립트만 해당(기능 파일은 전부 배포됨).
 EXCLUDED_FILES = {
-    "fee_analysis.py",
     "verify_coupang_option.py",
     "verify_naver_option.py",
     "patch6.py",
@@ -62,9 +57,6 @@ CHECK_DIRS = [
     ("", ""),        # 프로젝트 루트
     ("apis", "apis"),  # apis/ 디렉토리
 ]
-
-FEE_ANALYSIS_LINE_MARKER = "fee_analysis"
-
 
 def _github_list_py_files(api_path):
     url = f"{GITHUB_API}/{api_path}?ref={GITHUB_REF}" if api_path else f"{GITHUB_API}?ref={GITHUB_REF}"
@@ -97,10 +89,6 @@ def _normalize(text):
     return text.replace("\r\n", "\n")
 
 
-def _strip_fee_analysis_lines(text):
-    return "\n".join(line for line in text.splitlines() if FEE_ANALYSIS_LINE_MARKER not in line)
-
-
 def _check_one_dir(local_dir, api_path, findings):
     remote_files = _github_list_py_files(api_path)  # {filename: git_blob_sha}
     local_full_dir = os.path.join(PROJECT_ROOT, local_dir) if local_dir else PROJECT_ROOT
@@ -126,11 +114,6 @@ def _check_one_dir(local_dir, api_path, findings):
             local_text = _normalize(f.read())
 
         remote_text = _normalize(_github_fetch_raw(display_name))
-
-        if filename == "server.py":
-            # server.py는 fee_analysis 관련 줄만 지우고 비교(패턴 기반 예외).
-            local_text = _strip_fee_analysis_lines(local_text)
-            remote_text = _strip_fee_analysis_lines(remote_text)
 
         if local_text != remote_text:
             findings["content_mismatch"].append(display_name)
