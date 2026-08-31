@@ -1689,6 +1689,42 @@ def confirm_match(payload: ConfirmMatchIn):
     return {"status": "success", "mapping": entry}
 
 
+@app.get("/api/product-mapping")
+def get_product_mapping():
+    """상품명 매핑 사전 전체 목록 조회. frontend/ProductMappingTab.jsx 화면에서 쓴다.
+    (등록/추가는 confirm_match가 이미 담당 — 이 라우트는 조회/삭제 전용으로 빠져있던 걸 보충)."""
+    mapping = _load_json_file(PRODUCT_MAPPING_FILE, [])
+    return {"status": "success", "data": mapping}
+
+
+@app.delete("/api/product-mapping/{esangin_name}")
+def delete_product_mapping(esangin_name: str, alias: str = Query(None)):
+    """alias 쿼리파라미터가 있으면 그 별칭 하나만, 없으면 esangin_name 항목 전체를 삭제한다.
+    별칭을 하나씩 지우다 마지막 하나까지 지워지면 빈 항목으로 남기지 않고 항목 자체도 정리한다."""
+    with _product_mapping_lock:
+        mapping = _load_json_file(PRODUCT_MAPPING_FILE, [])
+        entry = next((e for e in mapping if e.get("esangin_core_name") == esangin_name), None)
+        if not entry:
+            return {"status": "error", "message": f"'{esangin_name}' 매핑을 찾을 수 없습니다."}
+
+        if alias:
+            aliases = entry.get("aliases", [])
+            if alias not in aliases:
+                return {"status": "error", "message": f"별칭 '{alias}'을(를) 찾을 수 없습니다."}
+            aliases.remove(alias)
+            if aliases:
+                import datetime
+                entry["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                mapping.remove(entry)
+        else:
+            mapping.remove(entry)
+
+        _save_json_file(PRODUCT_MAPPING_FILE, mapping)
+
+    return {"status": "success"}
+
+
 # ==========================================
 # 🔄 채널 재고 동기화 미리보기 (dry-run 전용, 실제 반영 없음)
 # ==========================================
