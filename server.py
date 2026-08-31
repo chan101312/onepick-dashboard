@@ -31,12 +31,21 @@ from apis import playauto_rpa
 from reorder import router as reorder_router
 # 💡 메모장 라우터 (자유메모 + 메모 카드) — memos.py 분리 모듈
 from memos import router as memos_router
+# 💡 오늘 할 일 라우터 — todos.py 분리 모듈
+from todos import router as todos_router
+# 💡 퇴근 전 체크리스트 라우터 (TodoListTab.jsx 하단에서 같이 씀) — checklist.py 분리 모듈
+from checklist import router as checklist_router
+# 💡 상품 이미지 배경 제거 라우터 — bgremove.py 분리 모듈
+from bgremove import router as bgremove_router
 # 💡 수수료분석 라우터 (정산 수수료 vs 예측 수수료) — fee_analysis.py 분리 모듈
 from fee_analysis import router as fee_analysis_router
 
 app = FastAPI()
 app.include_router(reorder_router)
 app.include_router(memos_router)
+app.include_router(todos_router)
+app.include_router(checklist_router)
+app.include_router(bgremove_router)
 app.include_router(fee_analysis_router)
 
 

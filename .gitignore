@@ -9,6 +9,17 @@ __pycache__/
 uploads/
 *.csv
 fee_cache_*.json
+product_mapping.json
+stock_snapshot.json
+sync_log.json
+stock_audit_history.json
+channel_link.json
+memo_freeform.json
+memo_cards.json
+checklist_items.json
+checklist_status.json
+todos.json
+bg_removed_outputs/
 
 # OS/editor
 .DS_Store
