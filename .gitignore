@@ -21,6 +21,9 @@ checklist_status.json
 todos.json
 bg_removed_outputs/
 prod_drift_status.json
+reorder_products.json
+product_vendor_map.json
+esangin_backup.json
 
 # OS/editor
 .DS_Store

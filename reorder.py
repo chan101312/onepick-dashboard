@@ -12,6 +12,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 REORDER_CONFIG_FILE = "reorder_products.json"  # 상품별 리드타임/안전재고 수동 설정
+VENDOR_MAP_FILE = "product_vendor_map.json"  # E상인 매입 전표 엑셀에서 자동 추출한 상품→매입처(빈도 최다 거래처) 매핑
 ESANGIN_BACKUP_FILE = "esangin_backup.json"    # EsanginStock 탭을 열 때마다 server.py가 덮어쓰는 실 재고 백업
 
 # E상인 saleticketlist(실 판매내역) 조회용 — server.py의 다른 E상인 연동 엔드포인트와 동일한 접속 정보
@@ -51,6 +52,7 @@ class ReorderConfigIn(BaseModel):
     lead_time_days: float = DEFAULT_LEAD_TIME_DAYS
     safety_stock_days: float = DEFAULT_SAFETY_STOCK_DAYS
     sales_cycle_days: int = DEFAULT_SALES_CYCLE_DAYS
+    on_demand: bool = False  # True면 당일매입형(비엔나 등 재고를 미리 안 쌓아두는 상품) - 재발주 알림 대상에서 제외
 
 
 class ReorderConfigUpdate(BaseModel):
@@ -58,6 +60,30 @@ class ReorderConfigUpdate(BaseModel):
     lead_time_days: float | None = None
     safety_stock_days: float | None = None
     sales_cycle_days: int | None = None
+    on_demand: bool | None = None
+
+
+def _load_vendor_map() -> dict[str, str]:
+    """E상인 매입 전표 엑셀에서 자동 추출한 상품명 → 매입처(빈도 최다 거래처) 매핑을 읽는다.
+    파일이 없으면 빈 dict(모든 상품 매입처 미상)."""
+    if not os.path.exists(VENDOR_MAP_FILE):
+        return {}
+    try:
+        with open(VENDOR_MAP_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _match_vendor(name: str, vendor_map: dict[str, str]) -> str | None:
+    """정확히 일치하는 이름으로 먼저 찾고, 없으면 부분 포함 매칭으로 폴백
+    (재고/판매 데이터의 표기와 매입 전표 상품명이 미세하게 다를 수 있어서)."""
+    if name in vendor_map:
+        return vendor_map[name]
+    for vname, vendor in vendor_map.items():
+        if vname and (vname in name or name in vname):
+            return vendor
+    return None
 
 
 def _load_configs() -> list[dict]:
@@ -99,6 +125,7 @@ def create_reorder_config(payload: ReorderConfigIn):
             "lead_time_days": payload.lead_time_days,
             "safety_stock_days": payload.safety_stock_days,
             "sales_cycle_days": cycle_days,
+            "on_demand": payload.on_demand,
         }
         configs.append(config)
         _save_configs(configs)
@@ -297,6 +324,7 @@ def _compute_alerts_from_db_sales(
     configs: list[dict],
 ) -> list[dict]:
     """실제 saleticketlist 판매량 기반 (요구사항 1~5): 최근 30일 판매 없는 상품은 알림 대상에서 제외."""
+    vendor_map = _load_vendor_map()
     stock_by_name: dict[str, float] = {}
     spec_by_name: dict[str, str] = {}
     for item in stock_items:
@@ -323,6 +351,8 @@ def _compute_alerts_from_db_sales(
         # 일평균은 상품별로 설정한 판매주기(기본 14일) 기준으로 계산한다.
         # 30일 고정으로 나누면 몰아서 나가는(박스단위) 상품이 비정상적으로 높은 일평균을 갖게 된다.
         config = _match_config(name, configs)
+        if config.get("on_demand"):
+            continue  # 당일매입형(비엔나 등) - 재고를 미리 안 쌓아두는 정상 운영 방식이라 알림 대상 아님
         cycle_days = config.get("sales_cycle_days", DEFAULT_SALES_CYCLE_DAYS)
         if cycle_days not in SALES_CYCLE_OPTIONS:
             cycle_days = DEFAULT_SALES_CYCLE_DAYS
@@ -350,6 +380,7 @@ def _compute_alerts_from_db_sales(
             "id": name,
             "product_name": name,
             "spec": spec_by_name.get(name, ""),
+            "vendor": _match_vendor(name, vendor_map),
             "current_stock": stock,
             "sales_30d": round(sales_30d, 1),
             "sales_cycle_days": cycle_days,
@@ -357,6 +388,14 @@ def _compute_alerts_from_db_sales(
             "days_remaining": round(days_remaining, 1),
             "urgency": urgency,
         })
+
+    # 최근 30일 판매량 기준 상위 30% = 많이 팔림(high), 나머지 70% = 덜 팔림(low).
+    if alerts:
+        sorted_sales = sorted((a["sales_30d"] for a in alerts), reverse=True)
+        cutoff_idx = max(0, int(len(sorted_sales) * 0.3) - 1)
+        cutoff_value = sorted_sales[cutoff_idx]
+        for a in alerts:
+            a["sales_tier"] = "high" if a["sales_30d"] >= cutoff_value else "low"
 
     return alerts
 
@@ -453,23 +492,22 @@ def _compute_alerts_fallback_estimate(stock_items: list[dict], configs: list[dic
 
 
 def _compute_deadstocks(stock_items: list[dict]) -> list[dict]:
-    """esangin_backup.json의 lastSalesDate만으로 판정하는 데드스톡 목록 (DB 성공/폴백 여부와 무관하게 항상 동일)."""
+    """esangin_backup.json의 lastSalesDate만으로 판정하는 데드스톡 목록 (DB 성공/폴백 여부와 무관하게 항상 동일).
+    요청사항 반영: 1) 재고가 있는(양수) 상품만 대상 2) 마지막 판매일로부터 100일 넘으면 제외
+    3) 판매기록 자체가 없어도 재고가 있으면 포함(no_sales_record)."""
     today = date.today()
     deadstocks = []
-
+    STALE_CUTOFF_DAYS = 100
     for item in stock_items:
         name = str(item.get("name", "")).strip()
         if not name or _is_excluded(name):
             continue
-
         try:
             stock = float(item.get("stock", 0) or 0)
         except (TypeError, ValueError):
             stock = 0
-
         spec = item.get("spec", "")
         last_sales_date = _parse_date(item.get("lastSalesDate"))
-
         base_entry = {
             "id": f"{name}_{spec}",
             "product_name": name,
@@ -477,22 +515,14 @@ def _compute_deadstocks(stock_items: list[dict]) -> list[dict]:
             "current_stock": stock,
             "last_sales_date": item.get("lastSalesDate", "") or "",
         }
-
         if stock <= 0:
-            if not (last_sales_date and (today - last_sales_date).days <= SOLD_OUT_STALE_DAYS):
-                days_since_sale = (today - last_sales_date).days if last_sales_date else None
-                deadstocks.append({
-                    **base_entry,
-                    "reason": "sold_out_stale" if last_sales_date else "no_sales_record",
-                    "days_since_last_sale": days_since_sale,
-                })
             continue
-
         if last_sales_date:
             days_since_sale = (today - last_sales_date).days
-            if days_since_sale >= SLOW_MOVING_DAYS:
+            if SLOW_MOVING_DAYS <= days_since_sale < STALE_CUTOFF_DAYS:
                 deadstocks.append({**base_entry, "reason": "slow_moving", "days_since_last_sale": days_since_sale})
-
+        else:
+            deadstocks.append({**base_entry, "reason": "no_sales_record", "days_since_last_sale": None})
     deadstocks.sort(key=lambda d: -(d["days_since_last_sale"] if d["days_since_last_sale"] is not None else 10**9))
     return deadstocks
 
