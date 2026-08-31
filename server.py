@@ -1461,10 +1461,11 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
             return not status.startswith('🟢 신규주문') if status else True
         return True
 
-    # E상인 대조 범위를 (target_end + 1일)까지 늘려서, 기간 마지막 날 주문이 다음날 처리되는 케이스도
-    # "주문일~주문일+1" 매칭에서 확인할 수 있게 한다.
+    # E상인 대조 범위를 (target_end + 1일)과 오늘 중 더 늦은 날짜까지 늘려서, 주문일 이후
+    # 며칠씩 밀려서 입력되는 전표까지도 "주문일~오늘" 매칭에서 확인할 수 있게 한다.
+    esangin_fetch_end = max(_next_date_str(target_end), today_str)
     try:
-        esangin_by_date = _fetch_esangin_sales_by_date(target_start, _next_date_str(target_end))
+        esangin_by_date = _fetch_esangin_sales_by_date(target_start, esangin_fetch_end)
     except Exception as e:
         return {"status": "error", "message": f"E상인 판매전표 조회 실패: {e}"}
 
@@ -1494,6 +1495,21 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                 date_pools[date_key] = set(esangin_by_date.get(date_key, {}).get(vendor, set())) if vendor else set()
             return date_pools[date_key]
 
+        def _pools_for_window(start_date_str):
+            """order_date부터 오늘까지 날짜별 풀을 리스트로 반환 — 주문일 이후 며칠씩
+            밀려서 입력되는 전표까지 대조 대상에 포함시키기 위함. start_date_str이 오늘보다
+            미래(이례적 케이스)면 최소 그 날짜 하나는 포함한다."""
+            try:
+                d = datetime.date.fromisoformat(start_date_str)
+                end_d = max(d, datetime.date.fromisoformat(today_str))
+            except Exception:
+                return [_pool_for(start_date_str)]
+            pools = []
+            while d <= end_d:
+                pools.append(_pool_for(d.isoformat()))
+                d += datetime.timedelta(days=1)
+            return pools
+
         today_orders = [o for o in orders if target_start <= str(o.get('결제일시', ''))[:10] <= target_end]
 
         # get_coupang_orders/get_new_orders는 상품 줄(item) 단위로 한 행씩 내려주기 때문에,
@@ -1517,8 +1533,7 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                 continue  # 결제완료(ACCEPT) 단계만인 주문 — 아직 처리 전이라 대조 대상에서 제외
 
             order_date = str(order_rows[0].get('결제일시', ''))[:10]
-            pool_today = _pool_for(order_date)
-            pool_next = _pool_for(_next_date_str(order_date))
+            match_window = _pools_for_window(order_date)
 
             missing_items = []
             checked_any = False
@@ -1529,23 +1544,27 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
                     continue
                 checked_any = True
 
-                candidate_names = pool_today | pool_next
+                candidate_names = set().union(*match_window) if match_window else set()
                 matched, matched_name, _match_confidence = _find_best_token_match(name, candidate_names)
                 if matched:
                     # 소비: 이 상품과 매칭된 E상인 전표는 실제로 들어있던 풀에서 빼서
                     # 다른 상품 줄이 같은 전표에 또 매칭되지 않게 한다.
-                    pool_today.discard(matched_name)
-                    pool_next.discard(matched_name)
+                    for pool in match_window:
+                        pool.discard(matched_name)
                     continue
 
                 # 토큰 유사도로 못 잡았으면, 사람이 예전에 확인해서 등록해둔 수동 매핑 사전을 확인한다
                 # (브랜드 표기가 아예 달라서 유사도로는 원래 못 잡는 케이스 보완용).
                 mapped_core = _find_mapped_esangin_core(name)
                 if mapped_core:
-                    hit = _pool_match_by_core(pool_today, mapped_core) or _pool_match_by_core(pool_next, mapped_core)
+                    hit = None
+                    for pool in match_window:
+                        hit = _pool_match_by_core(pool, mapped_core)
+                        if hit:
+                            break
                     if hit:
-                        pool_today.discard(hit)
-                        pool_next.discard(hit)
+                        for pool in match_window:
+                            pool.discard(hit)
                         continue
 
                 core = _extract_core_name(name)

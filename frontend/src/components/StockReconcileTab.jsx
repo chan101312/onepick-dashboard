@@ -120,11 +120,6 @@ export default function StockReconcileTab() {
   }, []);
 
   useEffect(() => {
-    fetchOrderReconcile(startDate, endDate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     fetchSyncPreview();
   }, [fetchSyncPreview]);
 
