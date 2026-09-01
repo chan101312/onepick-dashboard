@@ -104,10 +104,10 @@ export default function MarginTab() {
 
   const [priceAlerts, setPriceAlerts] = useState([]);
 
-  const [ackPrices, setAckPrices] = useState(() => {
-    const savedPrices = localStorage.getItem('acknowledgedPrices');
-    return savedPrices ? JSON.parse(savedPrices) : {};
-  });
+  // 확인(ack) 상태는 서버(price_tracker.json)가 기준이다 — localStorage는 기기/브라우저별로
+  // 따로 놀아서 "다른 데서 보면 확인한 알림이 다시 뜬다" 문제가 있었다. fetchPriceAlerts가
+  // 서버 응답의 ackPrice로 매번 이 값을 다시 채운다.
+  const [ackPrices, setAckPrices] = useState({});
 
   // 🔗 채널(쿠팡/네이버/식봄) 연결
   const CHANNEL_LABELS = { coupang: '쿠팡', naver: '네이버', sikbom: '식봄' };
@@ -300,21 +300,24 @@ export default function MarginTab() {
       const result = await res.json();
       
       if (result.status === 'success') {
-        // 무조건 금고(localStorage)를 뜯어서 최신 상태 확인 (새로고침 무적 방어)
-        const currentAckPrices = JSON.parse(localStorage.getItem('acknowledgedPrices') || '{}');
+        // 서버(price_tracker.json)에 저장된 ackPrice가 기준 (기기/브라우저 무관하게 항상 최신)
+        const serverAck = {};
         const alerts = [];
 
         result.data.forEach(item => {
           if (item.name.includes('스티로폼') || item.name.includes('아이스팩')) return;
 
           const currentPrice = Number(String(item.inPrice || '0').replace(/[^0-9]/g, ''));
-          const prevPrice = item.prevInPrice !== undefined 
-                          ? Number(String(item.prevInPrice).replace(/[^0-9]/g, '')) 
+          const prevPrice = item.prevInPrice !== undefined
+                          ? Number(String(item.prevInPrice).replace(/[^0-9]/g, ''))
                           : currentPrice;
 
           const itemKey = `${item.name}_${item.spec || ''}`;
-          const lastSeenPrice = currentAckPrices[itemKey]; 
-          const referencePrice = lastSeenPrice !== undefined ? lastSeenPrice : prevPrice;
+          const ackPrice = (item.ackPrice !== undefined && item.ackPrice !== null)
+                          ? Number(String(item.ackPrice).replace(/[^0-9]/g, ''))
+                          : undefined;
+          if (ackPrice !== undefined) serverAck[itemKey] = ackPrice;
+          const referencePrice = ackPrice !== undefined ? ackPrice : prevPrice;
 
           if (currentPrice !== referencePrice && referencePrice > 0) {
             alerts.push({
@@ -327,8 +330,9 @@ export default function MarginTab() {
             });
           }
         });
-        
+
         alerts.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+        setAckPrices(serverAck);
         setPriceAlerts(alerts);
       }
     } catch (e) {
@@ -336,31 +340,52 @@ export default function MarginTab() {
     }
   };
 
-  // 💡 개별 확인 버튼: 0.1초만에 화면에서 날려버림!
-  const handleConfirmAlert = (alert) => {
-    if (window.confirm("해당 변동 내역을 확인하셨습니까? (목록에서 숨겨집니다)")) {
-      const newAck = { ...ackPrices, [alert.id]: alert.newPrice };
-      setAckPrices(newAck);
-      localStorage.setItem('acknowledgedPrices', JSON.stringify(newAck));
-      
-      // 🚀 화면을 그리고 있는 배열에서 즉시 도려냅니다!
-      setPriceAlerts(prev => prev.filter(a => a.id !== alert.id));
+  // 확인 상태를 서버(price_tracker.json)에 저장한다 — localStorage는 기기/브라우저별로
+  // 따로 놀아서 다른 곳에서 보면 이미 확인한 알림이 새로 뜬 것처럼 보이는 문제가 있었다.
+  const ackPriceOnServer = async (items) => {
+    const res = await fetch(`${API_BASE}/api/esangin-stock/ack-price`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' },
+      body: JSON.stringify({ items })
+    });
+    const data = await res.json();
+    if (data.status !== 'success') {
+      throw new Error(data.message || '알 수 없는 오류');
     }
   };
 
-  // 💡 전체 확인 버튼: 0.1초만에 화면 전체를 폭파시킴!
-  const handleConfirmAllAlerts = () => {
-    if (window.confirm("모든 가격 변동 알림을 확인 처리하시겠습니까? (전부 숨겨집니다)")) {
-      const newAck = { ...ackPrices };
-      priceAlerts.forEach(alert => {
-        newAck[alert.id] = alert.newPrice;
-      });
-      setAckPrices(newAck);
-      localStorage.setItem('acknowledgedPrices', JSON.stringify(newAck));
-      
-      // 🚀 화면을 그리고 있는 배열 자체를 빈 깡통([])으로 강제 초기화! 절대 못 버팁니다!
-      setPriceAlerts([]);
+  // 💡 개별 확인 버튼: 서버에 저장 후 화면에서 날려버림!
+  const handleConfirmAlert = async (targetAlert) => {
+    if (!window.confirm("해당 변동 내역을 확인하셨습니까? (목록에서 숨겨집니다)")) return;
+    try {
+      await ackPriceOnServer([{ name: targetAlert.name, spec: targetAlert.spec || '', price: targetAlert.newPrice }]);
+    } catch (err) {
+      window.alert(`확인 처리 실패: ${err.message}`);
+      return;
     }
+    setAckPrices(prev => ({ ...prev, [targetAlert.id]: targetAlert.newPrice }));
+    // 🚀 화면을 그리고 있는 배열에서 즉시 도려냅니다!
+    setPriceAlerts(prev => prev.filter(a => a.id !== targetAlert.id));
+  };
+
+  // 💡 전체 확인 버튼: 서버에 일괄 저장 후 화면 전체를 폭파시킴!
+  const handleConfirmAllAlerts = async () => {
+    if (!window.confirm("모든 가격 변동 알림을 확인 처리하시겠습니까? (전부 숨겨집니다)")) return;
+    const items = priceAlerts.map(a => ({ name: a.name, spec: a.spec || '', price: a.newPrice }));
+    if (items.length === 0) return;
+    try {
+      await ackPriceOnServer(items);
+    } catch (err) {
+      window.alert(`확인 처리 실패: ${err.message}`);
+      return;
+    }
+    setAckPrices(prev => {
+      const newAck = { ...prev };
+      priceAlerts.forEach(a => { newAck[a.id] = a.newPrice; });
+      return newAck;
+    });
+    // 🚀 화면을 그리고 있는 배열 자체를 빈 깡통([])으로 강제 초기화!
+    setPriceAlerts([]);
   };
 
   // 이제 priceAlerts 자체를 지워버리기 때문에 2중 필터링은 거들 뿐입니다.

@@ -515,19 +515,31 @@ async def upload_naver_product(
 # ==========================================
 # 🏢 8. E상인 실시간 재고 연동 API (🔥 진정한 직전 매입가 추적 엔진)
 # ==========================================
-@app.get("/api/esangin-stock")
-def get_esangin_stock():
-    backup_file = "esangin_backup.json" 
-    tracker_file = "price_tracker.json" # 💡 [신규] 가격이 변할 때만 기록하는 AI 비밀 장부
+_price_tracker_lock = Lock()
+PRICE_TRACKER_FILE = "price_tracker.json"
 
-    # 1. AI 비밀 장부 불러오기
-    price_tracker = {}
-    if os.path.exists(tracker_file):
+
+def _load_price_tracker():
+    if os.path.exists(PRICE_TRACKER_FILE):
         try:
-            with open(tracker_file, "r", encoding="utf-8") as f:
-                price_tracker = json.load(f)
+            with open(PRICE_TRACKER_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception as e:
             print(f"장부 읽기 에러 (무시됨): {e}")
+    return {}
+
+
+@app.get("/api/esangin-stock")
+def get_esangin_stock():
+    backup_file = "esangin_backup.json"
+
+    with _price_tracker_lock:
+        return _get_esangin_stock_locked(backup_file)
+
+
+def _get_esangin_stock_locked(backup_file):
+    # 1. AI 비밀 장부 불러오기 (가격 변할 때만 기록 + 사용자가 확인한 가격도 여기 같이 저장)
+    price_tracker = _load_price_tracker()
 
     try:
         conn = pymysql.connect(
@@ -575,7 +587,8 @@ def get_esangin_stock():
 
             # 진정한 직전 매입가 추출!
             true_prev_price = price_tracker[unique_key]["prev"]
-            
+            ack_price = price_tracker[unique_key].get("ack")  # 사용자가 서버에 "확인했다"고 저장한 가격 (없으면 None)
+
             stock_data.append({
                 "name": name,
                 "spec": spec,
@@ -584,12 +597,13 @@ def get_esangin_stock():
                 "stock": stock_qty,
                 "inPrice": current_price,       # 최근 매입가
                 "prevInPrice": true_prev_price, # 👈 직전 매입가 (가격 변동이 있었을 때만 다름!)
+                "ackPrice": ack_price,           # 👈 사용자가 마지막으로 확인 완료한 가격 (서버 기준, 기기 무관)
                 "lastSalesDate": safe_decode(r[6]) if len(r) > 6 else "",
                 "lastInDate": safe_decode(r[7]) if len(r) > 7 else ""
             })
-            
+
         # 2. AI 장부와 백업 파일 모두 안전하게 저장
-        with open(tracker_file, "w", encoding="utf-8") as f:
+        with open(PRICE_TRACKER_FILE, "w", encoding="utf-8") as f:
             json.dump(price_tracker, f, ensure_ascii=False, indent=2)
         with open(backup_file, "w", encoding="utf-8") as f:
             json.dump(stock_data, f, ensure_ascii=False, indent=2)
@@ -603,6 +617,40 @@ def get_esangin_stock():
                 backup_data = json.load(f)
             return {"status": "success", "data": backup_data, "source": "backup"}
         return {"status": "error", "message": "사무실 PC가 꺼져있고, 백업 파일도 없습니다.", "data": []}
+
+
+# ==========================================
+# ✅ 8-1. E상인 매입 단가 변동 "확인 완료" 처리 API
+# ==========================================
+# localStorage(브라우저 로컬)가 아니라 서버(price_tracker.json)에 저장한다 —
+# 그래야 기기/브라우저가 달라도, 캐시를 지워도 확인한 알림이 다시 뜨지 않는다.
+@app.post("/api/esangin-stock/ack-price")
+async def ack_esangin_price(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return {"status": "error", "message": "items(배열)는 필수입니다."}
+
+    with _price_tracker_lock:
+        price_tracker = _load_price_tracker()
+        for item in items:
+            name = str((item or {}).get("name", "")).strip()
+            spec = str((item or {}).get("spec", "") or "").strip()
+            price = (item or {}).get("price")
+            if not name or price is None:
+                continue
+            unique_key = f"{name}_{spec}"
+            if unique_key not in price_tracker:
+                price_tracker[unique_key] = {"current": price, "prev": price}
+            price_tracker[unique_key]["ack"] = price
+        with open(PRICE_TRACKER_FILE, "w", encoding="utf-8") as f:
+            json.dump(price_tracker, f, ensure_ascii=False, indent=2)
+
+    return {"status": "success"}
+
 
 # ==========================================
 # 💾 9. E상인 비상 백업 수동 저장 API
