@@ -7,8 +7,8 @@ bgremove.py 라우터 등록 — 전부 "prod에 SSH로 직접 수정하고 git�
 패턴으로 발생한 사고였다. 이 스크립트는 그 패턴을 사후에 고치는 게 아니라
 사고 나는 즉시(다음 cron 실행 시) 알아채기 위한 안전망이다.
 
-정답 소스: GitHub의 feat/fee-analysis-tab 브랜치 (main에 아직 안 머지됨 —
-머지되면 정답을 main으로 옮기는 걸 고려할 것).
+정답 소스: GitHub의 main 브랜치 (2026-09-01 feat/fee-analysis-tab을 main으로
+fast-forward 병합 완료 — 그 전까지는 feat/fee-analysis-tab을 정답으로 썼었다).
 
 fee_analysis 기능은 2026-09-01 Task 9로 prod에 실제 배포 완료 — 더 이상
 예외 처리 안 하고 다른 파일과 똑같이 감시한다(fee_analysis.py 제외 및
@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 GITHUB_REPO = "chan101312/onepick-dashboard"
-GITHUB_REF = "feat/fee-analysis-tab"
+GITHUB_REF = "main"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
