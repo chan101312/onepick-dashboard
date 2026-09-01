@@ -24,6 +24,7 @@ prod_drift_status.json
 reorder_products.json
 product_vendor_map.json
 esangin_backup.json
+fee_analysis_mapping.json
 
 # OS/editor
 .DS_Store

@@ -31,6 +31,13 @@ export default function FeeAnalysisTab() {
   const [errMsg, setErrMsg] = useState('');
   const [sortKey, setSortKey] = useState('diff_abs');
 
+  // 미매칭 상품 수동 지정("이 상품 지정하기") 관련 상태
+  const [marginNames, setMarginNames] = useState(null);   // 마진산출장부 상품명 목록 (지연 로드, 1회만)
+  const [mappingTarget, setMappingTarget] = useState(null); // 지정 중인 미매칭 항목 (모달용)
+  const [mappingSearch, setMappingSearch] = useState('');
+  const [mappingSaving, setMappingSaving] = useState(false);
+  const [mappingDoneMsg, setMappingDoneMsg] = useState('');
+
   const load = useCallback(async (m) => {
     setLoading(true);
     setErrMsg('');
@@ -65,6 +72,53 @@ export default function FeeAnalysisTab() {
     }
     setRefreshing(false);
   };
+
+  const openMappingModal = async (u) => {
+    setMappingTarget(u);
+    setMappingSearch('');
+    setMappingDoneMsg('');
+    if (marginNames === null) {
+      try {
+        const res = await fetch(`${API_BASE}/api/margin/data`, { headers: H });
+        const j = await res.json();
+        const names = (j.summary_data || []).map((r) => r['온라인 상품명']).filter(Boolean);
+        setMarginNames([...new Set(names)]);
+      } catch {
+        setMarginNames([]);
+      }
+    }
+  };
+
+  const saveMapping = async (marginProductName) => {
+    if (!mappingTarget) return;
+    setMappingSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/fee-analysis/mapping`, {
+        method: 'POST',
+        headers: { ...H, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: mappingTarget.channel,
+          settle_id: mappingTarget.channel === 'coupang' ? mappingTarget.vendor_item_id : mappingTarget.settle_product_id,
+          settle_name: mappingTarget.product_name,
+          margin_product_name: marginProductName,
+        }),
+      });
+      const j = await res.json();
+      if (j.status === 'success') {
+        setMappingDoneMsg(`"${mappingTarget.product_name}" → "${marginProductName}" 지정 완료. 다음 "정산 갱신"부터 반영됩니다.`);
+        setMappingTarget(null);
+      } else {
+        alert(`지정 실패: ${j.message || '알 수 없는 오류'}`);
+      }
+    } catch (e) {
+      alert(`지정 실패: 서버에 연결할 수 없습니다. (${e.message})`);
+    }
+    setMappingSaving(false);
+  };
+
+  const filteredMarginNames = (marginNames || []).filter(
+    (n) => !mappingSearch.trim() || n.includes(mappingSearch.trim())
+  );
 
   const rows = data ? [...(data.rows ?? [])].sort(SORTS[sortKey]) : [];
 
@@ -106,6 +160,12 @@ export default function FeeAnalysisTab() {
       {errMsg && !refreshing && (
         <div style={{ marginBottom: '14px', padding: '12px 16px', borderRadius: '12px', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)', color: 'var(--amber)', fontSize: '13px', fontWeight: 600 }}>
           <Emoji>⚠️</Emoji> {errMsg}
+        </div>
+      )}
+
+      {mappingDoneMsg && (
+        <div style={{ marginBottom: '14px', padding: '12px 16px', borderRadius: '12px', background: 'color-mix(in srgb, var(--success) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)', color: 'var(--success)', fontSize: '13px', fontWeight: 600 }}>
+          <Emoji>✅</Emoji> {mappingDoneMsg}
         </div>
       )}
 
@@ -196,7 +256,7 @@ export default function FeeAnalysisTab() {
                 <div className="responsive-overflow" style={{ overflowX: 'auto', marginTop: '8px', background: 'var(--surface)', borderRadius: '12px' }}>
                   <table style={{ width: '100%', minWidth: '520px', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead style={{ background: 'var(--surface-2)' }}>
-                      <tr>{['상품명', '채널', '매출', '실제수수료'].map((h) => <th key={h} style={{ padding: '8px', textAlign: h === '상품명' ? 'left' : 'right' }}>{h}</th>)}</tr>
+                      <tr>{['상품명', '채널', '매출', '실제수수료', ''].map((h, i) => <th key={i} style={{ padding: '8px', textAlign: h === '상품명' ? 'left' : 'right' }}>{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {data.unmatched.map((u, i) => (
@@ -205,6 +265,11 @@ export default function FeeAnalysisTab() {
                           <td style={{ padding: '6px 8px', textAlign: 'right' }}>{u.channel === 'naver' ? '네이버' : '쿠팡'}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'right' }}>{won(u.revenue)}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'right' }}>{won(u.actual_fee)}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                            <button onClick={() => openMappingModal(u)} className="tab-icon-btn" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                              이 상품 지정하기
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -218,6 +283,55 @@ export default function FeeAnalysisTab() {
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-3)' }}>월을 선택하고 "정산 갱신"을 눌러주세요.</div>
         )}
       </div>
+
+      {mappingTarget && (
+        <div
+          onClick={() => !mappingSaving && setMappingTarget(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="ui-card"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px', width: '420px', maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
+          >
+            <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>이 상품 지정하기</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '12px' }}>
+              "{mappingTarget.product_name}" ({mappingTarget.channel === 'naver' ? '네이버' : '쿠팡'})을 마진산출장부의 어느 상품으로 볼지 선택하세요.
+            </div>
+            <input
+              type="text"
+              autoFocus
+              placeholder="마진산출장부 상품명으로 검색..."
+              value={mappingSearch}
+              onChange={(e) => setMappingSearch(e.target.value)}
+              style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px', marginBottom: '10px' }}
+            />
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {marginNames === null && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '12px' }}>상품 목록 불러오는 중...</div>}
+              {marginNames !== null && filteredMarginNames.length === 0 && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '12px' }}>검색 결과가 없습니다.</div>
+              )}
+              {filteredMarginNames.slice(0, 200).map((name) => (
+                <button
+                  key={name}
+                  disabled={mappingSaving}
+                  onClick={() => saveMapping(name)}
+                  style={{ textAlign: 'left', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px', cursor: mappingSaving ? 'default' : 'pointer', opacity: mappingSaving ? 0.6 : 1 }}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setMappingTarget(null)}
+              disabled={mappingSaving}
+              style={{ marginTop: '12px', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-3)', fontSize: '12px' }}
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

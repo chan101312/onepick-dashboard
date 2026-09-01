@@ -525,3 +525,105 @@ def test_get_fee_analysis_rejects_bad_month(tmp_path, monkeypatch):
     r = c.get("/api/fee-analysis?month=../../etc/passwd")
     assert r.json()["status"] == "error"
     assert "YYYY-MM" in r.json()["message"]
+
+
+# ===== 미매칭 상품 수동 지정("이 상품 지정하기") =====
+
+def test_match_product_manual_mapping_beats_everything():
+    margin_index = fa._build_margin_index([{"온라인 상품명": "타겟상품"}])
+    manual_by_id, manual_by_name = fa._build_manual_mapping_index([
+        {"channel": "naver", "settle_id": "999", "settle_name": "이상한이름", "margin_product_name": "타겟상품"},
+    ])
+    # ID로 지정된 매핑은 이름이 전혀 안 비슷해도(fuzzy면 0점) 최우선으로 매칭돼야 한다.
+    row, method, conf = fa._match_product("전혀다른이름", "999", "naver", margin_index, {},
+                                           manual_by_id, manual_by_name)
+    assert row["온라인 상품명"] == "타겟상품"
+    assert method == "manual" and conf == 1.0
+
+
+def test_match_product_manual_mapping_falls_back_to_name_when_no_id():
+    margin_index = fa._build_margin_index([{"온라인 상품명": "타겟상품"}])
+    manual_by_id, manual_by_name = fa._build_manual_mapping_index([
+        {"channel": "coupang", "settle_id": None, "settle_name": "옵션상품명", "margin_product_name": "타겟상품"},
+    ])
+    row, method, conf = fa._match_product("옵션상품명", None, "coupang", margin_index, {},
+                                           manual_by_id, manual_by_name)
+    assert row["온라인 상품명"] == "타겟상품"
+    assert method == "manual"
+
+
+def test_aggregate_unmatched_becomes_matched_after_manual_mapping():
+    naver_lines = [{"product_id": "pid1", "product_name": "이상한채널이름",
+                    "revenue": 10000.0, "fee": 300.0, "qty": 1.0, "qty_partial": False}]
+    margin_rows = [{"온라인 상품명": "진짜상품", "매입": "1000", "네이버 수수료": "300", "네이버 판매가": "10000"}]
+
+    # 매핑 없이는 미매칭.
+    agg_before = fa._aggregate(naver_lines, [], margin_rows, {})
+    assert len(agg_before["rows"]) == 0
+    assert len(agg_before["unmatched"]) == 1
+
+    # 수동 매핑 등록 후에는 매칭돼서 rows로 들어가고 unmatched에서 빠진다.
+    manual_mapping = [{"channel": "naver", "settle_id": "pid1", "settle_name": "이상한채널이름",
+                        "margin_product_name": "진짜상품"}]
+    agg_after = fa._aggregate(naver_lines, [], margin_rows, {}, manual_mapping)
+    assert len(agg_after["unmatched"]) == 0
+    assert len(agg_after["rows"]) == 1
+    assert agg_after["rows"][0]["product_name"] == "진짜상품"
+    assert agg_after["rows"][0]["match_method"] == "manual"
+
+
+def test_create_fee_mapping_and_get(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+
+    r = c.post("/api/fee-analysis/mapping", json={
+        "channel": "naver", "settle_id": "pid1", "settle_name": "이상한이름",
+        "margin_product_name": "진짜상품",
+    })
+    assert r.json()["status"] == "success"
+
+    r2 = c.get("/api/fee-analysis/mapping")
+    data = r2.json()["data"]
+    assert len(data) == 1
+    assert data[0]["margin_product_name"] == "진짜상품"
+
+
+def test_create_fee_mapping_upserts_same_settle_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+
+    c.post("/api/fee-analysis/mapping", json={
+        "channel": "naver", "settle_id": "pid1", "settle_name": "이름A", "margin_product_name": "상품A",
+    })
+    c.post("/api/fee-analysis/mapping", json={
+        "channel": "naver", "settle_id": "pid1", "settle_name": "이름A", "margin_product_name": "상품B",
+    })
+    data = c.get("/api/fee-analysis/mapping").json()["data"]
+    assert len(data) == 1   # 새로 추가 안 되고 덮어씀
+    assert data[0]["margin_product_name"] == "상품B"
+
+
+def test_create_fee_mapping_validation_errors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(fa.router)
+    c = TestClient(app)
+
+    r1 = c.post("/api/fee-analysis/mapping", json={"channel": "bad", "settle_name": "x", "margin_product_name": "y"})
+    assert r1.json()["status"] == "error"
+
+    r2 = c.post("/api/fee-analysis/mapping", json={"channel": "naver", "settle_name": "x", "margin_product_name": ""})
+    assert r2.json()["status"] == "error"
+
+    r3 = c.post("/api/fee-analysis/mapping", json={"channel": "naver", "margin_product_name": "y"})
+    assert r3.json()["status"] == "error"   # settle_id/settle_name 둘 다 없음

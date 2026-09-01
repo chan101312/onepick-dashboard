@@ -56,7 +56,18 @@ def _build_margin_index(rows):
     return out
 
 
-def _match_product(settle_name, settle_id, channel, margin_index, link_index):
+def _match_product(settle_name, settle_id, channel, margin_index, link_index,
+                    manual_by_id=None, manual_by_name=None):
+    # 0) 수동 지정(사람이 "이 상품 지정하기"로 직접 매핑한 것) — 항상 최우선.
+    manual_target = None
+    if settle_id is not None and manual_by_id:
+        manual_target = manual_by_id.get((channel, str(settle_id)))
+    if manual_target is None and manual_by_name:
+        manual_target = manual_by_name.get((channel, settle_name))
+    if manual_target:
+        for nm, _norm, row in margin_index:
+            if nm == manual_target:
+                return row, "manual", 1.0
     # 1) ID 매칭
     if settle_id is not None:
         target = link_index.get((channel, str(settle_id)))
@@ -296,9 +307,10 @@ def _fetch_coupang_revenue(month, warnings):
     return out
 
 
-def _aggregate(naver_lines, coupang_lines, margin_rows, links):
+def _aggregate(naver_lines, coupang_lines, margin_rows, links, manual_mapping=None):
     link_idx = _build_link_index(links)
     margin_idx = _build_margin_index(margin_rows)
+    manual_by_id, manual_by_name = _build_manual_mapping_index(manual_mapping)
 
     buckets = {}   # (margin_name, channel) -> {"agg":{...}, "row":margin_row, "method":..., "conf":...}
     unmatched = []
@@ -310,7 +322,8 @@ def _aggregate(naver_lines, coupang_lines, margin_rows, links):
     def ingest(channel, settle_id, settle_name, revenue, fee, qty, qty_partial, spid, vid):
         ch_totals[channel]["revenue"] += revenue
         ch_totals[channel]["actual_fee"] += fee
-        row, method, conf = _match_product(settle_name, settle_id, channel, margin_idx, link_idx)
+        row, method, conf = _match_product(settle_name, settle_id, channel, margin_idx, link_idx,
+                                            manual_by_id, manual_by_name)
         if row is None:
             ch_totals[channel]["unmatched_revenue"] += revenue
             ch_totals[channel]["unmatched_fee"] += fee
@@ -370,6 +383,13 @@ _refresh_lock = threading.Lock()
 MARGIN_CSV = "uploads/online.csv"
 CHANNEL_LINK_FILE = "channel_link.json"
 
+# 미매칭 상품을 사람이 수동으로 마진산출장부 상품에 지정해주는 사전. product_mapping.json
+# (E상인 이름 대상)이나 channel_link.json(채널연결 — 네이버는 channelProductNo를 쓰는데
+# 정산 매칭에 필요한 건 productId라 ID 체계가 달라 재사용하면 저장은 되어도 매칭엔 안 먹는다)
+# 과는 별개로, "정산 라인 → 마진산출장부 상품명"을 직접 매핑하는 전용 파일을 둔다.
+FEE_MAPPING_FILE = "fee_analysis_mapping.json"
+_fee_mapping_lock = threading.Lock()
+
 
 def _load_margin_rows():
     if not os.path.exists(MARGIN_CSV):
@@ -388,6 +408,37 @@ def _load_channel_links():
             return json.load(f)
     except Exception:
         return {}
+
+
+def _load_fee_mapping():
+    if not os.path.exists(FEE_MAPPING_FILE):
+        return []
+    try:
+        with open(FEE_MAPPING_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_fee_mapping(entries):
+    with open(FEE_MAPPING_FILE, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+
+def _build_manual_mapping_index(entries):
+    """{(channel, settle_id): margin_product_name} — settle_id가 없는 항목은
+    {(channel, settle_name): margin_product_name}으로 이름 기준 폴백 인덱스에 넣는다."""
+    by_id, by_name = {}, {}
+    for e in entries or []:
+        channel = e.get("channel")
+        name = e.get("margin_product_name")
+        if not channel or not name:
+            continue
+        if e.get("settle_id"):
+            by_id[(channel, str(e["settle_id"]))] = name
+        elif e.get("settle_name"):
+            by_name[(channel, e["settle_name"])] = name
+    return by_id, by_name
 
 
 _CANCEL_HINTS = ("CANCEL", "RETURN", "REFUND")
@@ -435,7 +486,7 @@ def build_payload(month):
     margin_rows = _load_margin_rows()
     if not margin_rows:
         warnings.append("uploads/online.csv 를 찾을 수 없어 상품 매칭을 건너뜁니다 — 전체가 미매칭 처리됩니다.")
-    agg = _aggregate(naver_lines, coupang_lines, margin_rows, _load_channel_links())
+    agg = _aggregate(naver_lines, coupang_lines, margin_rows, _load_channel_links(), _load_fee_mapping())
     # partial: 실제 조회 실패/누락이 있었는지 (아래 §5 상시 안내문은 제외하고 판정)
     partial = len(warnings) > 0
     warnings.append("이번 달 후반 판매분은 아직 정산 미확정이라 일부 누락될 수 있습니다. 다음 달에 다시 갱신하세요.")
@@ -499,3 +550,54 @@ async def refresh_fee_analysis(request: Request):
         return {"status": "success", **payload}
     finally:
         _refresh_lock.release()
+
+
+@router.get("/api/fee-analysis/mapping")
+def get_fee_mapping():
+    """수동 지정된 (정산 라인 → 마진산출장부 상품) 매핑 전체 목록."""
+    return {"status": "success", "data": _load_fee_mapping()}
+
+
+@router.post("/api/fee-analysis/mapping")
+async def create_fee_mapping(request: Request):
+    """미매칭 상품을 마진산출장부의 특정 상품으로 수동 지정한다("이 상품 지정하기").
+    channel+settle_id(없으면 channel+settle_name)로 기존 항목을 찾아 upsert — 같은
+    정산 라인을 다시 지정하면 새로 추가되지 않고 덮어쓴다. 저장 즉시 반영되는 게
+    아니라 다음 "정산 갱신"부터 매칭에 쓰인다(order-reconcile 수동 매핑과 동일한 UX)."""
+    body = await request.json()
+    channel = str((body or {}).get("channel", "")).strip()
+    settle_name = str((body or {}).get("settle_name", "")).strip()
+    raw_settle_id = (body or {}).get("settle_id")
+    settle_id = str(raw_settle_id).strip() if raw_settle_id else None
+    margin_product_name = str((body or {}).get("margin_product_name", "")).strip()
+
+    if channel not in ("naver", "coupang"):
+        return {"status": "error", "message": "channel은 naver 또는 coupang이어야 합니다."}
+    if not margin_product_name:
+        return {"status": "error", "message": "margin_product_name은 비어있으면 안 됩니다."}
+    if not settle_id and not settle_name:
+        return {"status": "error", "message": "settle_id 또는 settle_name 중 하나는 있어야 합니다."}
+
+    now_str = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+    with _fee_mapping_lock:
+        entries = _load_fee_mapping()
+        existing = next((
+            e for e in entries
+            if e.get("channel") == channel and (
+                (settle_id and e.get("settle_id") == settle_id)
+                or (not settle_id and not e.get("settle_id") and e.get("settle_name") == settle_name)
+            )
+        ), None)
+        if existing:
+            existing["margin_product_name"] = margin_product_name
+            existing["settle_name"] = settle_name or existing.get("settle_name", "")
+            existing["updated_at"] = now_str
+        else:
+            entries.append({
+                "channel": channel, "settle_id": settle_id, "settle_name": settle_name,
+                "margin_product_name": margin_product_name,
+                "created_at": now_str, "updated_at": now_str,
+            })
+        _save_fee_mapping(entries)
+
+    return {"status": "success"}
