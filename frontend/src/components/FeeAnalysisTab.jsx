@@ -225,6 +225,9 @@ export default function FeeAnalysisTab() {
                         {r.match_method === 'name' && (
                           <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--text-3)', border: '1px solid var(--border)', borderRadius: '999px', padding: '1px 5px' }}>이름매칭</span>
                         )}
+                        {r.match_method === 'manual' && (
+                          <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: '999px', padding: '1px 5px' }}>수동지정</span>
+                        )}
                       </td>
                       <td style={{ padding: '8px 10px', textAlign: 'right' }}>{r.channel === 'naver' ? '네이버' : '쿠팡'}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right' }}>{r.qty_partial ? '*' : ''}{Math.round(r.qty)}</td>
