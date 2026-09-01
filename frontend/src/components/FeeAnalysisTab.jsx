@@ -106,6 +106,18 @@ export default function FeeAnalysisTab() {
       const j = await res.json();
       if (j.status === 'success') {
         setMappingDoneMsg(`"${mappingTarget.product_name}" → "${marginProductName}" 지정 완료. 다음 "정산 갱신"부터 반영됩니다.`);
+        // 저장 성공을 사용자가 지금 보고 있는 미매칭 목록에서 바로 눈에 띄게 해준다 — 실제 재계산은
+        // 다음 "정산 갱신"부터지만, 여기서 화면에 아무 변화가 없으면 "안 됐나?" 싶어서 같은 항목을
+        // 또 누르게 된다(실제로 사용자가 그랬음: 같은 상품을 두 번 저장한 기록이 로그에 남아있었음).
+        setData((prev) => prev && ({
+          ...prev,
+          unmatched: prev.unmatched.filter((u) => !(
+            u.channel === mappingTarget.channel
+            && u.product_name === mappingTarget.product_name
+            && u.settle_product_id === mappingTarget.settle_product_id
+            && u.vendor_item_id === mappingTarget.vendor_item_id
+          )),
+        }));
         setMappingTarget(null);
       } else {
         alert(`지정 실패: ${j.message || '알 수 없는 오류'}`);
