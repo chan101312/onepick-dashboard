@@ -489,7 +489,14 @@ def build_payload(month):
     agg = _aggregate(naver_lines, coupang_lines, margin_rows, _load_channel_links(), _load_fee_mapping())
     # partial: 실제 조회 실패/누락이 있었는지 (아래 §5 상시 안내문은 제외하고 판정)
     partial = len(warnings) > 0
-    warnings.append("이번 달 후반 판매분은 아직 정산 미확정이라 일부 누락될 수 있습니다. 다음 달에 다시 갱신하세요.")
+    # 실측 확인(2026-09): 쿠팡 revenue-history의 recognitionDate가 saleDate보다 8~13일(평균 9일)
+    # 늦게 잡힌다 — 즉 최근 1~2주 판매분은 조회 시점에 정산 인식 자체가 아직 안 끝나서 API 응답에
+    # 아예 없다(버그가 아니라 정산 처리 소요 시간 때문). 예: 월초에 지난달 숫자를 보면 지난달 마지막
+    # 1~2주 매출이 통째로 빠져 보일 수 있다.
+    warnings.append(
+        "최근 1~2주 판매분은 정산 인식이 아직 안 돼서(쿠팡 기준 통상 8~13일 소요) 매출/수수료가 "
+        "실제보다 축소돼 보일 수 있습니다. 이번 달 후반 판매분은 다음 달 중순 이후 다시 갱신해서 확인하세요."
+    )
     kst = timezone(timedelta(hours=9))
     return {
         "month": month, "basis": "sale",

@@ -451,7 +451,7 @@ def test_build_payload_warns_when_csv_missing(monkeypatch):
     monkeypatch.setattr(fa, "_load_channel_links", lambda: {})
     p = fa.build_payload("2026-07")
     assert any("online.csv" in w for w in p["warnings"])
-    assert any("다음 달에 다시 갱신" in w for w in p["warnings"])   # §5 상시 안내문
+    assert any("정산 인식" in w and "8~13일" in w for w in p["warnings"])   # §5 상시 안내문
     assert p["partial"] is True                                    # csv 누락 = 부분 데이터
 
 
