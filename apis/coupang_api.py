@@ -159,17 +159,18 @@ def get_coupang_orders(start_date=None, end_date=None):
 # ==========================================
 def get_coupang_products():
     """등록된 판매상품 목록(sellerProductId, sellerProductName)을 페이징으로 전부 수집한다.
-    TODO: 응답의 페이지네이션 계속 여부를 알려주는 정확한 필드명이 공식 문서에서 확인 안 됨.
-    일단 페이지 번호를 1씩 증가시키며(get_my_products와 동일 방식) 결과가 빌 때까지 반복하고,
+    응답의 nextToken(opaque 커서 값)을 그대로 다음 요청에 실어 보내야 다음 페이지가 나온다 —
+    이전에는 페이지 번호(1,2,3...)를 nextToken 자리에 넣어 보내서 2페이지부터 항상 빈 응답을
+    받았고, 그 결과 seller-products 목록이 첫 100개에서 조용히 잘려나갔다.
     무한루프 방지용으로 최대 50페이지(≈최대 5,000개)에서 강제 종료한다."""
     if not all([VENDOR_ID, ACCESS_KEY, SECRET_KEY]):
         return []
 
     products = []
-    page = 1
+    next_token = ""
     MAX_PAGES = 50
-    while page <= MAX_PAGES:
-        query = f"vendorId={VENDOR_ID}&nextToken={page}&maxPerPage=100"
+    for page in range(1, MAX_PAGES + 1):
+        query = f"vendorId={VENDOR_ID}&nextToken={next_token}&maxPerPage=100"
         uri = f"/v2/providers/seller_api/apis/api/v1/marketplace/seller-products?{query}"
         url = f"https://api-gateway.coupang.com{uri}"
         auth_header = generate_coupang_signature("GET", uri)
@@ -180,7 +181,8 @@ def get_coupang_products():
             print(f"[쿠팡 재고조회] 상품 목록 조회 실패 (page={page}): HTTP {res.status_code} — {res.text[:300]}")
             break
 
-        items = (res.json() or {}).get('data', [])
+        body = res.json() or {}
+        items = body.get('data', [])
         if not items:
             break
 
@@ -189,7 +191,10 @@ def get_coupang_products():
                 "sellerProductId": item.get("sellerProductId"),
                 "sellerProductName": str(item.get("sellerProductName", "")).strip(),
             })
-        page += 1
+
+        next_token = str(body.get('nextToken') or "")
+        if not next_token:
+            break
 
     return products
 
