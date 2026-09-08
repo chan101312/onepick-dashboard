@@ -503,6 +503,36 @@ body {
 .reorder-settings-panel { margin-top: 10px; padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); }
 :root[data-theme='light'] .reorder-settings-panel { background: #fafaf8 !important; border: 1px solid #e5e5e0 !important; }
 
+/* 재발주 카드의 "제안 발주량" 칩: 라이트 모드에서 계속 회색으로 보인 진짜 원인은 두 가지가 겹친 것.
+   1) 위 434번째 줄이 모든 input의 색/배경을 !important로 덮어쓴다.
+   2) 437번째 줄이 모든 <div>/<span>의 글자색을 #1a1a1a로 !important 덮어쓴다 — 라벨(div)과
+      단위 "개"(span)도 여기 걸린다. var(--accent)를 썼던 것도 원인이었다(라이트 테마의
+      --accent는 #1a1a1a라 애초에 파랑이 아님, 다크 테마 값(#3b82f6)만 파랑이었다).
+   그래서 리터럴 파랑(#1565C0)을 세 요소(라벨/입력칸/단위) 모두에 !important로 못박는다. */
+:root[data-theme='light'] .reorder-qty-label,
+:root[data-theme='light'] .reorder-qty-unit {
+  color: #1565C0 !important;
+}
+:root[data-theme='light'] .reorder-qty-input {
+  background: transparent !important;
+  border: none !important;
+  color: #1565C0 !important;
+}
+
+/* 재발주 카드의 "마이너스"/"품절" 배지와 재고 칩: 배경은 지정한 대로(빨강/진남색) 나오지만,
+   글자색은 위 437번째 줄의 전역 규칙 때문에 라이트 모드에서 항상 #1a1a1a로 깔린다.
+   빨강 배경은 그럭저럭 읽히지만 진남색(#475569) 배경은 대비가 너무 낮아 거의 안 보였다.
+   흰 글씨를 !important로 못박는다. EmojiText가 라벨 안에 색 없는 <span>을 하나 더 두므로
+   자손까지 같이 지정한다. */
+:root[data-theme='light'] .reorder-badge-white,
+:root[data-theme='light'] .reorder-alert-chip-value {
+  color: #fff !important;
+}
+:root[data-theme='light'] .reorder-alert-chip-label,
+:root[data-theme='light'] .reorder-alert-chip-label * {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
 .channel-status-pill { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 999px; white-space: nowrap; cursor: default; }
 .channel-badge { color: #fff; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; }
 

@@ -14,6 +14,11 @@ router = APIRouter()
 REORDER_CONFIG_FILE = "reorder_products.json"  # 상품별 리드타임/안전재고 수동 설정
 VENDOR_MAP_FILE = "product_vendor_map.json"  # E상인 매입 전표 엑셀에서 자동 추출한 상품→매입처(빈도 최다 거래처) 매핑
 ESANGIN_BACKUP_FILE = "esangin_backup.json"    # EsanginStock 탭을 열 때마다 server.py가 덮어쓰는 실 재고 백업
+# 발주 제안 수량 계산 기준(목표 재고일수) — 여러 기기/브라우저에서 같은 값을 보도록 localStorage 대신 서버에 저장
+REORDER_SETTINGS_FILE = "reorder_settings.json"
+# "발주 완료"로 숨긴 알림 — 마찬가지로 기기/브라우저 간 일관성을 위해 localStorage 대신 서버에 저장.
+# {상품id: "재고-소진일수" 서명} 형태. 재고/소진일수가 바뀌면 서명이 달라져 자동으로 다시 알림에 뜬다.
+REORDER_DISMISSED_FILE = "reorder_dismissed.json"
 
 # E상인 saleticketlist(실 판매내역) 조회용 — server.py의 다른 E상인 연동 엔드포인트와 동일한 접속 정보
 # connect_timeout을 짧게 걸어두는 이유: 방화벽이 SYN 패킷을 그냥 버리는(DROP) 경우
@@ -33,6 +38,7 @@ _lock = Lock()
 
 DEFAULT_LEAD_TIME_DAYS = 3
 DEFAULT_SAFETY_STOCK_DAYS = 7
+DEFAULT_TARGET_STOCK_DAYS = 14  # 발주 제안 수량 = 일평균 × 이 값 − 현재재고
 
 # 박스/묶음 단위로 몰아서 나가는 상품은 30일 고정으로 일평균을 내면 (예: 한 달에 한 번 대량 주문)
 # 비정상적으로 높은 값이 나온다. 상품별로 실제 발주 주기에 맞는 기간을 고를 수 있게 한다.
@@ -45,6 +51,7 @@ EXCLUDED_NAME_KEYWORDS = ['택배비', '배송비', '아이스팩', '스티로�
 SOLD_OUT_STALE_DAYS = 30  # 품절 + 이 기간 넘게 안 팔렸으면 알림 대신 데드스톡으로 분류
 SLOW_MOVING_DAYS = 60     # 재고 있음 + 이 기간 넘게 안 팔렸으면 데드스톡으로 분류
 SALES_LOOKBACK_DAYS = max(SALES_CYCLE_OPTIONS)  # saleticketlist 조회 시 미리 긁어올 최대 기간 (30일)
+VENDOR_LOOKBACK_DAYS = 90  # 매입처 필터 목록 기준: 지금 재발주가 필요한 상품인지와 무관하게 최근 3개월 실거래 기준으로 판단
 
 
 class ReorderConfigIn(BaseModel):
@@ -61,6 +68,15 @@ class ReorderConfigUpdate(BaseModel):
     safety_stock_days: float | None = None
     sales_cycle_days: int | None = None
     on_demand: bool | None = None
+
+
+class ReorderSettingsUpdate(BaseModel):
+    target_stock_days: float
+
+
+class ReorderDismissIn(BaseModel):
+    id: str
+    signature: str
 
 
 def _load_vendor_map() -> dict[str, str]:
@@ -163,6 +179,87 @@ def delete_reorder_config(config_id: str):
             return {"status": "error", "message": "설정을 찾을 수 없습니다."}
         _save_configs(remaining)
     return {"status": "success"}
+
+
+def _load_settings() -> dict:
+    if not os.path.exists(REORDER_SETTINGS_FILE):
+        return {"target_stock_days": DEFAULT_TARGET_STOCK_DAYS}
+    try:
+        with open(REORDER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data.setdefault("target_stock_days", DEFAULT_TARGET_STOCK_DAYS)
+        return data
+    except Exception as e:
+        print(f"[ERR] reorder settings load failed: {e}")
+        return {"target_stock_days": DEFAULT_TARGET_STOCK_DAYS}
+
+
+def _save_settings(settings: dict):
+    with open(REORDER_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
+# ==========================================
+# ⚙️ 발주 제안 수량 계산 기준(목표 재고일수) — 기기/브라우저 간 동일한 값 유지를 위해 서버 저장
+# ==========================================
+@router.get("/api/reorder/settings")
+def get_reorder_settings():
+    with _lock:
+        return {"status": "success", "data": _load_settings()}
+
+
+@router.put("/api/reorder/settings")
+def update_reorder_settings(payload: ReorderSettingsUpdate):
+    if payload.target_stock_days <= 0:
+        return {"status": "error", "message": "목표 재고일수는 0보다 커야 합니다."}
+    with _lock:
+        settings = _load_settings()
+        settings["target_stock_days"] = payload.target_stock_days
+        _save_settings(settings)
+    return {"status": "success", "data": settings}
+
+
+def _load_dismissed() -> dict:
+    if not os.path.exists(REORDER_DISMISSED_FILE):
+        return {}
+    try:
+        with open(REORDER_DISMISSED_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[ERR] reorder dismissed load failed: {e}")
+        return {}
+
+
+def _save_dismissed(dismissed: dict):
+    with open(REORDER_DISMISSED_FILE, "w", encoding="utf-8") as f:
+        json.dump(dismissed, f, ensure_ascii=False, indent=2)
+
+
+# ==========================================
+# ✅ "발주 완료" 숨김 상태 — 기기/브라우저 간 동일하게 보이도록 서버 저장 (기존 localStorage 대체)
+# ==========================================
+@router.get("/api/reorder/dismissed")
+def get_reorder_dismissed():
+    with _lock:
+        return {"status": "success", "data": _load_dismissed()}
+
+
+@router.put("/api/reorder/dismissed")
+def upsert_reorder_dismissed(payload: ReorderDismissIn):
+    if not payload.id:
+        return {"status": "error", "message": "id가 필요합니다."}
+    with _lock:
+        dismissed = _load_dismissed()
+        dismissed[payload.id] = payload.signature
+        _save_dismissed(dismissed)
+    return {"status": "success", "data": dismissed}
+
+
+@router.delete("/api/reorder/dismissed")
+def clear_reorder_dismissed():
+    with _lock:
+        _save_dismissed({})
+    return {"status": "success", "data": {}}
 
 
 def _match_config(name: str, configs: list[dict]) -> dict:
@@ -318,13 +415,76 @@ def _fetch_recent_sales_from_db() -> dict[str, list[tuple[date, float]]] | None:
     return dated_sales
 
 
+def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None]:
+    """
+    saleticketlist에서 최근 VENDOR_LOOKBACK_DAYS(90)일간의 (상품명, 거래처) 실거래를 직접 조회한다.
+
+    기존엔 매입처 필터 목록/각 알림의 vendor 필드를 product_vendor_map.json(엑셀에서 수동으로
+    한 번 뽑아둔 상품→매입처 스냅샷)에만 의존했다. 이 파일은 생성 시점 이후 거래는 알 수 없고,
+    또 프론트 필터 목록은 그중에서도 "지금 재발주가 필요한 상품"에 연결된 매입처만 모아서 보여줬다.
+    그 결과 최근 3개월 내 실거래가 있어도(예: 조은수산) 재발주 대상 상품과 안 엮이면 필터에 아예 안 뜨는
+    문제가 있었다. saleticketlist에는 각 거래 라인에 거래처 상호(STLUTSangHo)가 이미 들어있으므로
+    엑셀 스냅샷을 거치지 않고 여기서 직접 뽑는다.
+
+    반환: (상품명 -> 최근 90일 내 가장 많이 거래한 매입처, 최근 90일 내 거래처 전체 목록[거래건수 많은 순]).
+    DB 접속/조회 실패 시 (None, None) — 호출부는 static 파일 기반 매칭으로 계속 동작한다.
+    """
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = pymysql.connect(**ESANGIN_DB_CONFIG)
+    except Exception as e:
+        print(f"[ERR][{started_at}] 매입처 목록 조회용 DB 접속 실패: {e}")
+        return None, None
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT STLJPName, STLUTSangHo, STLDate FROM `saleticketlist` "
+                "WHERE STLUTSangHo IS NOT NULL AND STLUTSangHo != '' "
+                "ORDER BY STLDate DESC LIMIT 60000"
+            )
+            rows = cursor.fetchall()
+    except Exception as e:
+        print(f"[ERR][{started_at}] 매입처 목록 조회 실패: {e}")
+        return None, None
+    finally:
+        conn.close()
+
+    cutoff_int = int((date.today() - timedelta(days=VENDOR_LOOKBACK_DAYS)).strftime("%Y%m%d"))
+    name_vendor_counts: dict[str, dict[str, int]] = {}
+    vendor_counts: dict[str, int] = {}
+
+    for raw_name, raw_vendor, raw_date in rows:
+        name = _safe_decode(raw_name)
+        vendor = _safe_decode(raw_vendor)
+        if not name or not vendor or _is_excluded(name):
+            continue
+
+        date_str = _safe_decode(raw_date).replace("-", "").replace(".", "").replace("/", "")
+        try:
+            if int(date_str[:8]) < cutoff_int:
+                continue
+        except Exception:
+            continue
+
+        name_vendor_counts.setdefault(name, {})
+        name_vendor_counts[name][vendor] = name_vendor_counts[name].get(vendor, 0) + 1
+        vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
+
+    vendor_by_name = {name: max(counts, key=counts.get) for name, counts in name_vendor_counts.items()}
+    all_vendors = [v for v, _ in sorted(vendor_counts.items(), key=lambda kv: -kv[1])]
+    return vendor_by_name, all_vendors
+
+
 def _compute_alerts_from_db_sales(
     stock_items: list[dict],
     dated_sales_by_name: dict[str, list[tuple[date, float]]],
     configs: list[dict],
+    live_vendor_by_name: dict[str, str] | None = None,
 ) -> list[dict]:
     """실제 saleticketlist 판매량 기반 (요구사항 1~5): 최근 30일 판매 없는 상품은 알림 대상에서 제외."""
     vendor_map = _load_vendor_map()
+    live_vendor_by_name = live_vendor_by_name or {}
     stock_by_name: dict[str, float] = {}
     spec_by_name: dict[str, str] = {}
     for item in stock_items:
@@ -380,7 +540,7 @@ def _compute_alerts_from_db_sales(
             "id": name,
             "product_name": name,
             "spec": spec_by_name.get(name, ""),
-            "vendor": _match_vendor(name, vendor_map),
+            "vendor": live_vendor_by_name.get(name) or _match_vendor(name, vendor_map),
             "current_stock": stock,
             "sales_30d": round(sales_30d, 1),
             "sales_cycle_days": cycle_days,
@@ -542,10 +702,11 @@ def get_reorder_alerts():
         configs = _load_configs()
 
     dated_sales_by_name = _fetch_recent_sales_from_db()
+    live_vendor_by_name, recent_vendors = _fetch_recent_vendor_data()
 
     if dated_sales_by_name is not None:
         data_source = "db"
-        alerts = _compute_alerts_from_db_sales(stock_items, dated_sales_by_name, configs)
+        alerts = _compute_alerts_from_db_sales(stock_items, dated_sales_by_name, configs, live_vendor_by_name)
     else:
         data_source = "fallback"
         alerts = _compute_alerts_fallback_estimate(stock_items, configs)
@@ -565,4 +726,6 @@ def get_reorder_alerts():
         "data_source": data_source,
         "alerts": alerts,
         "deadstocks": deadstocks,
+        # 지금 재발주 대상 상품(alerts)에 안 엮여 있어도, 최근 3개월 내 실거래가 있으면 필터에 노출하기 위한 전체 매입처 목록
+        "vendors": recent_vendors or [],
     }
