@@ -79,6 +79,11 @@ class ReorderDismissIn(BaseModel):
     signature: str
 
 
+class OnDemandToggleIn(BaseModel):
+    product_name: str
+    on_demand: bool
+
+
 def _load_vendor_map() -> dict[str, str]:
     """E상인 매입 전표 엑셀에서 자동 추출한 상품명 → 매입처(빈도 최다 거래처) 매핑을 읽는다.
     파일이 없으면 빈 dict(모든 상품 매입처 미상)."""
@@ -179,6 +184,70 @@ def delete_reorder_config(config_id: str):
             return {"status": "error", "message": "설정을 찾을 수 없습니다."}
         _save_configs(remaining)
     return {"status": "success"}
+
+
+# ==========================================
+# 🚫 당일매입형(on_demand) 빠른 토글 + 제외목록
+#   재발주 알림 표/카드에서 바로 "제외"하거나, 제외목록 탭에서 "제외 해제"할 때 쓴다.
+#   기존 POST /api/reorder/products는 무조건 append라 같은 상품이 여러 번 들어갈 수 있어서,
+#   여기서는 product_name 기준 upsert로 처리한다.
+# ==========================================
+@router.post("/api/reorder/on-demand")
+def toggle_on_demand(payload: OnDemandToggleIn):
+    name = payload.product_name.strip()
+    if not name:
+        return {"status": "error", "message": "상품명을 입력해주세요."}
+    with _lock:
+        configs = _load_configs()
+        target = next((c for c in configs if c.get("product_name") == name), None)
+        if target is None:
+            target = {
+                "id": uuid.uuid4().hex,
+                "product_name": name,
+                "lead_time_days": DEFAULT_LEAD_TIME_DAYS,
+                "safety_stock_days": DEFAULT_SAFETY_STOCK_DAYS,
+                "sales_cycle_days": DEFAULT_SALES_CYCLE_DAYS,
+                "on_demand": False,
+            }
+            configs.append(target)
+        target["on_demand"] = payload.on_demand
+        if payload.on_demand:
+            target["on_demand_since"] = date.today().strftime("%Y-%m-%d")
+        else:
+            target.pop("on_demand_since", None)
+        _save_configs(configs)
+    return {"status": "success", "data": target}
+
+
+@router.get("/api/reorder/on-demand")
+def list_on_demand():
+    """on_demand=true인 상품 전체를 규격/매입처와 함께 반환 (제외목록 탭용)."""
+    with _lock:
+        configs = _load_configs()
+
+    esangin_items, _ = _load_esangin_items()
+    spec_by_name: dict[str, str] = {}
+    for item in (esangin_items or []):
+        nm = str(item.get("name", "")).strip()
+        if nm and not spec_by_name.get(nm) and item.get("spec"):
+            spec_by_name[nm] = str(item.get("spec", "")).strip()
+
+    vendor_map = _load_vendor_map()
+
+    data = []
+    for c in configs:
+        if not c.get("on_demand"):
+            continue
+        name = c.get("product_name", "")
+        data.append({
+            "id": c.get("id"),
+            "product_name": name,
+            "spec": spec_by_name.get(name, ""),
+            "vendor": _match_vendor(name, vendor_map) or "",
+            "on_demand_since": c.get("on_demand_since", ""),
+        })
+    data.sort(key=lambda d: d["product_name"])
+    return {"status": "success", "data": data}
 
 
 def _load_settings() -> dict:
@@ -361,15 +430,18 @@ def _fetch_recent_sales_from_db() -> dict[str, list[tuple[date, float]]] | None:
 
     try:
         with conn.cursor() as cursor:
+            # saleticketlist에는 매출 전표와 매입 전표가 한 테이블에 섞여 있고 STLState('매출'/'매입')로만
+            # 구분된다. 판매량 집계에 매입(입고) 수량이 섞이면 daily_avg_sales가 부풀려져 발주량/긴급도가
+            # 왜곡되므로, STLState도 같이 읽어와 아래 루프에서 '매출' 행만 남긴다.
             try:
                 cursor.execute(
-                    "SELECT STLJPName, STLJPSu, STLDate FROM `saleticketlist` "
+                    "SELECT STLJPName, STLJPSu, STLDate, STLState FROM `saleticketlist` "
                     "WHERE STLJPName IS NOT NULL AND STLJPName != '' "
                     "ORDER BY STLDate DESC LIMIT 30000"
                 )
             except Exception:
                 cursor.execute(
-                    "SELECT STLJPName, STLSu, STLDate FROM `saleticketlist` "
+                    "SELECT STLJPName, STLSu, STLDate, STLState FROM `saleticketlist` "
                     "WHERE STLJPName IS NOT NULL AND STLJPName != '' "
                     "ORDER BY STLDate DESC LIMIT 30000"
                 )
@@ -391,7 +463,10 @@ def _fetch_recent_sales_from_db() -> dict[str, list[tuple[date, float]]] | None:
     cutoff_int = int((date.today() - timedelta(days=SALES_LOOKBACK_DAYS)).strftime("%Y%m%d"))
     dated_sales: dict[str, list[tuple[date, float]]] = {}
 
-    for raw_name, raw_qty, raw_date in rows:
+    for raw_name, raw_qty, raw_date, raw_state in rows:
+        if _safe_decode(raw_state) != "매출":
+            continue  # 매입(입고) 전표 라인은 판매량이 아니므로 제외
+
         name = _safe_decode(raw_name)
         if not name or _is_excluded(name):
             continue
@@ -438,8 +513,11 @@ def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None
 
     try:
         with conn.cursor() as cursor:
+            # saleticketlist는 매출/매입 전표가 한 테이블에 섞여 있고 STLState('매출'/'매입')로만 구분된다.
+            # 매출 행의 STLUTSangHo는 우리가 "판매한" 상대(쿠팡·스마트스토어·식봄 같은 채널, 귀인한우촌 같은
+            # B2B 거래처)이므로 매입처가 아니다. STLState도 읽어와 아래 루프에서 '매입' 행만 남긴다.
             cursor.execute(
-                "SELECT STLJPName, STLUTSangHo, STLDate FROM `saleticketlist` "
+                "SELECT STLJPName, STLUTSangHo, STLDate, STLState FROM `saleticketlist` "
                 "WHERE STLUTSangHo IS NOT NULL AND STLUTSangHo != '' "
                 "ORDER BY STLDate DESC LIMIT 60000"
             )
@@ -454,7 +532,10 @@ def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None
     name_vendor_counts: dict[str, dict[str, int]] = {}
     vendor_counts: dict[str, int] = {}
 
-    for raw_name, raw_vendor, raw_date in rows:
+    for raw_name, raw_vendor, raw_date, raw_state in rows:
+        if _safe_decode(raw_state) != "매입":
+            continue  # 매출 전표 라인의 상대는 판매채널/거래처이지 매입처가 아니므로 제외
+
         name = _safe_decode(raw_name)
         vendor = _safe_decode(raw_vendor)
         if not name or not vendor or _is_excluded(name):
