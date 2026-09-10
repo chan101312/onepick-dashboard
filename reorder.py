@@ -568,6 +568,11 @@ def _compute_alerts_from_db_sales(
     live_vendor_by_name = live_vendor_by_name or {}
     stock_by_name: dict[str, float] = {}
     spec_by_name: dict[str, str] = {}
+    # E상인 jeapum에는 이름(JPName)이 완전히 같은데 규격(JPGuKuk)만 다른 제품이 여럿 존재한다
+    # (예: "[선일] 생칵테일새우 (31/40)" → 250g*10(재고0) / 900g*10(70미)(재고60) / 1.8kg*6(160미)(재고18)).
+    # 재고는 이름 기준으로 합산하되, 화면에 보여줄 규격은 "가장 활발한(재고 절대값이 큰) 변형"의 것을 쓴다.
+    # (그냥 처음 나온 규격을 쓰면 단종된 재고 0짜리 규격이 잡혀 엉뚱하게 표시됨.)
+    _spec_pick_score: dict[str, float] = {}
     for item in stock_items:
         name = str(item.get("name", "")).strip()
         if not name or _is_excluded(name):
@@ -577,8 +582,12 @@ def _compute_alerts_from_db_sales(
         except (TypeError, ValueError):
             stock = 0
         stock_by_name[name] = stock_by_name.get(name, 0) + stock
-        if not spec_by_name.get(name) and item.get("spec"):
-            spec_by_name[name] = item.get("spec", "")
+        spec = str(item.get("spec", "") or "").strip()
+        if spec:
+            score = abs(stock)
+            if name not in spec_by_name or score > _spec_pick_score.get(name, -1.0):
+                spec_by_name[name] = spec
+                _spec_pick_score[name] = score
 
     today = date.today()
     alerts = []

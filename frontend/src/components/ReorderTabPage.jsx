@@ -131,7 +131,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [lastUpdated, setLastUpdated] = useState('');
   const [dataSource, setDataSource] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // 마운트 직후 바로 fetchAlerts가 돌므로 true로 시작
   const [dismissed, setDismissed] = useState({});
   const [deadstockOpen, setDeadstockOpen] = useState(false);
   const [sortMode, setSortMode] = useState(DEFAULT_SORT);
@@ -274,9 +274,19 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     setDeadstockPage((p) => Math.min(p, maxPage));
   }, [deadstocks.length]);
 
+  // 로딩 오버레이는 아래 세 갈래의 return 어디에서도 보여야 한다(특히 최초 마운트 시엔 alerts가
+  // 아직 빈 배열이라 "빈 상태" return으로 빠지는데, 그때도 데이터 fetch 중이면 스피너가 필요).
+  const loadingOverlay = (isLoading || busyPulse) ? (
+    <div className="reorder-loading-overlay">
+      <div className="reorder-big-spinner" />
+      <div className="reorder-loading-label">불러오는 중…</div>
+    </div>
+  ) : null;
+
   if (errorMsg) {
     return (
       <div className="reorder-alert-wrap">
+        {loadingOverlay}
         <div className="reorder-status-row reorder-status-empty">
           <span><Emoji>⚠️</Emoji> {errorMsg}</span>
         </div>
@@ -299,8 +309,9 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   if (visibleAlerts.length === 0 && deadstocks.length === 0) {
     return (
       <div className="reorder-alert-wrap">
+        {loadingOverlay}
         <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
-          <span>{statusText}</span>
+          <span>{isLoading ? <><Emoji>🔄</Emoji> 재발주 데이터를 불러오는 중…</> : statusText}</span>
           <button className="reorder-refresh-btn" onClick={handleRefreshClick} disabled={isLoading}>
             {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
           </button>
@@ -519,12 +530,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
 
   return (
     <div className="reorder-alert-wrap">
-      {(isLoading || busyPulse) && (
-        <div className="reorder-loading-overlay">
-          <div className="reorder-big-spinner" />
-          <div className="reorder-loading-label">불러오는 중…</div>
-        </div>
-      )}
+      {loadingOverlay}
 
       <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
         <span>{statusText}</span>
