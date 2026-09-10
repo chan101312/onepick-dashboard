@@ -254,13 +254,13 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     setAlertPage(1);
   }, [sortMode, vendorMode]);
 
-  // 정렬/매입처 필터를 바꾸면 목록이 크게 다시 그려지므로, 잠깐(400ms) 중앙 스피너를 띄워
+  // 정렬/매입처 필터를 바꾸면 목록이 크게 다시 그려지므로, 잠깐(800ms) 중앙 스피너를 띄워
   // "반영 중"이라는 시각적 피드백을 준다. (실데이터는 이미 받아둬서 네트워크 재요청은 없음.)
   const didMountRef = useRef(false);
   useEffect(() => {
     if (!didMountRef.current) { didMountRef.current = true; return; }
     setBusyPulse(true);
-    const t = setTimeout(() => setBusyPulse(false), 400);
+    const t = setTimeout(() => setBusyPulse(false), 800);
     return () => clearTimeout(t);
   }, [sortMode, vendorMode]);
 
@@ -522,6 +522,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       {(isLoading || busyPulse) && (
         <div className="reorder-loading-overlay">
           <div className="reorder-big-spinner" />
+          <div className="reorder-loading-label">불러오는 중…</div>
         </div>
       )}
 
@@ -985,9 +986,16 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                                 }}>
                                   {a.current_stock}개
                                 </span>
-                              ) : (
-                                <span style={{ fontWeight: a.current_stock === 0 ? 700 : 400 }}>{a.current_stock}개</span>
-                              )}
+                              ) : (() => {
+                                const boxUnit = parseBoxUnit(a.spec);
+                                const boxTxt = a.current_stock > 0 && boxUnit
+                                  ? ` (${Math.ceil(a.current_stock / boxUnit)}박스)` : '';
+                                return (
+                                  <span style={{ fontWeight: a.current_stock === 0 ? 700 : 400 }}>
+                                    {a.current_stock}개{boxTxt}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td style={{ ...SUMMARY_TD, textAlign: 'right', fontWeight: 700 }}>
                               {qty === '' ? '-' : formatQtyWithBox(qty, a.spec)}
@@ -1089,16 +1097,31 @@ const SUB_TABS = [
 
 export default function ReorderTabPage({ onUrgentCountChange } = {}) {
   const [subTab, setSubTab] = useState('alerts');
+  const [tabSwitching, setTabSwitching] = useState(false);
+
+  const switchSubTab = (key) => {
+    if (key === subTab) return;
+    setSubTab(key);
+    setTabSwitching(true);
+    setTimeout(() => setTabSwitching(false), 700);
+  };
 
   return (
     <div>
+      {tabSwitching && (
+        <div className="reorder-loading-overlay">
+          <div className="reorder-big-spinner" />
+          <div className="reorder-loading-label">불러오는 중…</div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {SUB_TABS.map((t) => {
           const active = subTab === t.key;
           return (
             <button
               key={t.key}
-              onClick={() => setSubTab(t.key)}
+              onClick={() => switchSubTab(t.key)}
               style={{
                 padding: '8px 18px', borderRadius: '999px', fontSize: '14px', cursor: 'pointer',
                 border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
