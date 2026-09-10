@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '../apiBase';
 import { signature, parseBoxUnit, formatQtyWithBox } from './reorderAlertUtils';
 import Pagination from './Pagination';
@@ -69,22 +69,15 @@ const SUMMARY_TD = { padding: '6px 10px', color: 'var(--text)', verticalAlign: '
 const SORT_OPTIONS = [
   { key: 'stock_asc', label: '재고 적은 순' },
   { key: 'sales_desc', label: '최근 30일 판매량 많은 순' },
-  { key: 'days_asc', label: '예상 소진일수 적은 순' },
-  { key: 'name_asc', label: '상품명 가나다순' },
 ];
 const DEFAULT_SORT = 'stock_asc';
 
-const TIER_TABS = [
-  { key: 'all', label: '전체' },
-  { key: 'high', label: '🔥 많이 팔림' },
-  { key: 'low', label: '🐢 덜 팔림' },
-];
-const DEFAULT_TIER = 'all';
+// 카드 뷰는 화면에서 뺐지만(요약 표 보기만 사용) 코드는 보존 — 되살리려면 이 값만 true로.
+const CARD_VIEW_ENABLED = false;
 
 const PAGE_SIZE = 20;
 const STALE_MS = 24 * 60 * 60 * 1000;
 const SELECTED_KEY = 'reorder_selected_ids_v1';
-const DEFAULT_TARGET_STOCK_DAYS = 14;
 const VENDOR_TABS_COLLAPSED_COUNT = 8; // 매입처가 많아지면 한 줄로 쫙 펼쳐져 복잡해지니 상위 N개만 먼저 보여주고 "더보기"로 펼친다
 
 function loadSelected() {
@@ -96,10 +89,12 @@ function loadSelected() {
   }
 }
 
-// 발주 제안 수량 = 일평균 × 목표재고일수 − 현재재고 (음수면 0). 일평균을 모르면(폴백 추정 모드 등) null.
-function suggestedQty(alert, targetDays) {
+// 발주 제안 수량 = 일평균 × 7일치 − 현재재고 (음수면 0). 일평균을 모르면(폴백 추정 모드 등) null.
+// (예전엔 화면의 "목표 재고일수" 입력값을 썼으나, UI 단순화로 7일 고정.)
+const REORDER_TARGET_DAYS = 7;
+function suggestedQty(alert) {
   if (alert.daily_avg_sales == null) return null;
-  const raw = alert.daily_avg_sales * targetDays - alert.current_stock;
+  const raw = alert.daily_avg_sales * REORDER_TARGET_DAYS - alert.current_stock;
   return Math.max(0, Math.round(raw));
 }
 
@@ -140,7 +135,6 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [dismissed, setDismissed] = useState({});
   const [deadstockOpen, setDeadstockOpen] = useState(false);
   const [sortMode, setSortMode] = useState(DEFAULT_SORT);
-  const [tierMode, setTierMode] = useState(DEFAULT_TIER);
   const [vendorMode, setVendorMode] = useState('all');
   const [vendorTabsExpanded, setVendorTabsExpanded] = useState(false);
   const [alertPage, setAlertPage] = useState(1);
@@ -148,35 +142,16 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [selectedIds, setSelectedIds] = useState(loadSelected);
   const [selectedOpen, setSelectedOpen] = useState(true);
   const [copyMsg, setCopyMsg] = useState('');
-  const [targetDays, setTargetDays] = useState(DEFAULT_TARGET_STOCK_DAYS);
-  const [targetDaysInput, setTargetDaysInput] = useState(String(DEFAULT_TARGET_STOCK_DAYS));
   const [qtyOverrides, setQtyOverrides] = useState({});
   const [orderSheetText, setOrderSheetText] = useState('');
   const [orderSheetOpen, setOrderSheetOpen] = useState(false);
   const [orderSheetCopyMsg, setOrderSheetCopyMsg] = useState('');
-  const [viewMode, setViewMode] = useState('cards');           // 'cards' | 'summary' — 기본은 기존 카드 뷰 유지
   const [summaryFormat, setSummaryFormat] = useState('table');  // 'table' | 'text'
   const [summaryCopyMsg, setSummaryCopyMsg] = useState('');
   const [excludeMsg, setExcludeMsg] = useState(null); // { type: 'ok' | 'error', text }
+  const [busyPulse, setBusyPulse] = useState(false); // 정렬/매입처 필터 변경 시 잠깐 로딩 스피너 표시용
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/reorder/settings`, {
-          headers: { 'ngrok-skip-browser-warning': '69420' },
-        });
-        const result = await res.json();
-        if (result.status === 'success' && result.data?.target_stock_days) {
-          setTargetDays(result.data.target_stock_days);
-          setTargetDaysInput(String(result.data.target_stock_days));
-        }
-      } catch (e) {
-        console.error('재발주 설정 조회 실패', e);
-      }
-    })();
-  }, []);
-
-  // "발주 완료" 숨김 상태도 목표재고일수와 같은 이유로 localStorage 대신 서버(reorder_dismissed.json)에 저장.
+  // "발주 완료" 숨김 상태는 localStorage 대신 서버(reorder_dismissed.json)에 저장 — 기기 간 일관성.
   useEffect(() => {
     (async () => {
       try {
@@ -192,26 +167,6 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
       }
     })();
   }, []);
-
-  // 목표재고일수는 기기마다 다르게 보이면 혼란스러우니 localStorage가 아니라 서버(reorder_settings.json)에 저장.
-  // 입력 중 매 키 입력마다 요청을 보내지 않도록 살짝 디바운스한다.
-  const persistTargetDays = useCallback((days) => {
-    fetch(`${API_BASE}/api/reorder/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_stock_days: days }),
-    }).catch((e) => console.error('재발주 설정 저장 실패', e));
-  }, []);
-
-  useEffect(() => {
-    const parsed = Number(targetDaysInput);
-    if (!targetDaysInput || Number.isNaN(parsed) || parsed <= 0) return;
-    const t = setTimeout(() => {
-      setTargetDays(parsed);
-      persistTargetDays(parsed);
-    }, 600);
-    return () => clearTimeout(t);
-  }, [targetDaysInput, persistTargetDays]);
 
   const fetchAlerts = useCallback(async () => {
     setIsLoading(true);
@@ -297,7 +252,17 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
 
   useEffect(() => {
     setAlertPage(1);
-  }, [sortMode, tierMode, vendorMode]);
+  }, [sortMode, vendorMode]);
+
+  // 정렬/매입처 필터를 바꾸면 목록이 크게 다시 그려지므로, 잠깐(400ms) 중앙 스피너를 띄워
+  // "반영 중"이라는 시각적 피드백을 준다. (실데이터는 이미 받아둬서 네트워크 재요청은 없음.)
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) { didMountRef.current = true; return; }
+    setBusyPulse(true);
+    const t = setTimeout(() => setBusyPulse(false), 400);
+    return () => clearTimeout(t);
+  }, [sortMode, vendorMode]);
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(visibleAlerts.length / PAGE_SIZE));
@@ -344,20 +309,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     );
   }
 
-  const urgencyCounts = visibleAlerts.reduce((acc, a) => {
-    acc[a.urgency] = (acc[a.urgency] || 0) + 1;
-    return acc;
-  }, {});
-
-  const tierCounts = visibleAlerts.reduce((acc, a) => {
-    const tier = a.sales_tier || 'low';
-    acc[tier] = (acc[tier] || 0) + 1;
-    return acc;
-  }, {});
-
-  const tierFilteredAlerts = tierMode === 'all'
-    ? visibleAlerts
-    : visibleAlerts.filter((a) => (a.sales_tier || 'low') === tierMode);
+  const tierFilteredAlerts = visibleAlerts; // tier 필터(전체/많이팔림/덜팔림) UI 제거 — 이름만 유지
 
   const vendorCounts = tierFilteredAlerts.reduce((acc, a) => {
     const v = a.vendor || '미상';
@@ -405,7 +357,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   // 입력칸에 표시할 값: 사용자가 직접 고친 값(override)이 있으면 그걸, 없으면 자동 제안 수량, 그마저 없으면 빈칸.
   const getQtyValue = (alert) => {
     if (qtyOverrides[alert.id] !== undefined) return qtyOverrides[alert.id];
-    const s = suggestedQty(alert, targetDays);
+    const s = suggestedQty(alert);
     return s == null ? '' : s;
   };
 
@@ -567,63 +519,18 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
 
   return (
     <div className="reorder-alert-wrap">
+      {(isLoading || busyPulse) && (
+        <div className="reorder-loading-overlay">
+          <div className="reorder-big-spinner" />
+        </div>
+      )}
+
       <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
         <span>{statusText}</span>
         <button className="reorder-refresh-btn" onClick={handleRefreshClick} disabled={isLoading}>
           {isLoading ? <><Emoji>🔄</Emoji> 확인 중...</> : <><Emoji>🔄</Emoji> 새로고침</>}
         </button>
       </div>
-
-      {visibleAlerts.length > 0 && (
-        <div className="reorder-summary-row" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', margin: '10px 0' }}>
-          <span style={{ fontSize: '13px', color: URGENCY_CONFIG.urgent.accent, fontWeight: 600 }}>
-            긴급 {urgencyCounts.urgent || 0}
-          </span>
-          <span style={{ fontSize: '13px', color: URGENCY_CONFIG.warning.accent, fontWeight: 600 }}>
-            주의 {urgencyCounts.warning || 0}
-          </span>
-          <span style={{ fontSize: '13px', color: URGENCY_CONFIG.notice.accent, fontWeight: 600 }}>
-            참고 {urgencyCounts.notice || 0}
-          </span>
-          <span style={{ fontSize: '13px', color: 'var(--text-3)' }}>· 총 발주 필요 {visibleAlerts.length}개</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-3)', marginLeft: 'auto' }}>
-            목표 재고일수
-            <input
-              type="number"
-              min="1"
-              value={targetDaysInput}
-              onChange={(e) => setTargetDaysInput(e.target.value)}
-              style={{ width: '56px', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text)', fontSize: '13px' }}
-            />
-            일치 기준으로 제안 발주량 계산 (모든 기기 공통)
-          </span>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: '8px', margin: '10px 0' }}>
-        {TIER_TABS.map((t) => {
-          const count = t.key === 'all' ? visibleAlerts.length : (tierCounts[t.key] || 0);
-          const active = tierMode === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTierMode(t.key)}
-              style={{
-                padding: '8px 16px', borderRadius: '999px', fontSize: '13px', cursor: 'pointer',
-                border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-                color: active ? 'var(--accent)' : 'var(--text-3)',
-                fontWeight: active ? 700 : 400,
-              }}
-            >
-              <EmojiText text={t.label} /> ({count})
-            </button>
-          );
-        })}
-      </div>
-      <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: 'var(--text-3)' }}>
-        ※ 최근 30일 판매량 기준 상위 30%를 "많이 팔림"으로 자동 분류합니다. 회전 빠른 상품부터 먼저 확인하세요.
-      </p>
 
       {vendorTabs.length > 0 && (() => {
         const collapsedVendorTabs = vendorTabs.slice(0, VENDOR_TABS_COLLAPSED_COUNT);
@@ -694,28 +601,8 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px', margin: '10px 0', flexWrap: 'wrap' }}>
-        {[['cards', '🗂 카드 보기'], ['summary', '📋 요약 보기']].map(([key, label]) => {
-          const active = viewMode === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setViewMode(key)}
-              style={{
-                padding: '8px 16px', borderRadius: '999px', fontSize: '13px', cursor: 'pointer',
-                border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
-                color: active ? 'var(--accent)' : 'var(--text-3)', fontWeight: active ? 700 : 400,
-              }}
-            >
-              <EmojiText text={label} />
-            </button>
-          );
-        })}
-      </div>
-
-      {viewMode === 'cards' ? (
-        <>
+      {CARD_VIEW_ENABLED ? (
+        <>{/* 카드 뷰 — 화면에서 제외됨(CARD_VIEW_ENABLED=false). 코드만 보존. */}
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
@@ -836,7 +723,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
           const isNegative = alert.current_stock < 0;       // 재고 마이너스(초과판매) — 빨강 계열
           const isZeroStock = alert.current_stock === 0;    // 완전 품절(재고 정확히 0개) — 회색/검정 계열
           const isSoldOut = isNegative || isZeroStock;
-          const suggested = suggestedQty(alert, targetDays);
+          const suggested = suggestedQty(alert);
           return (
             <div
               key={alert.id}
@@ -1058,6 +945,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                     <th style={SUMMARY_TH}>상품명</th>
                     <th style={SUMMARY_TH}>규격</th>
                     <th style={SUMMARY_TH}>매입처</th>
+                    <th style={{ ...SUMMARY_TH, textAlign: 'right' }}>현재 재고</th>
                     <th style={{ ...SUMMARY_TH, textAlign: 'right' }}>제안발주량</th>
                     <th style={SUMMARY_TH}>긴급도</th>
                     <th style={{ ...SUMMARY_TH, textAlign: 'center' }}>제외</th>
@@ -1068,7 +956,7 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                     <React.Fragment key={g.vendor}>
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           style={{
                             padding: '7px 10px', fontWeight: 700, color: 'var(--text)',
                             background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
@@ -1089,6 +977,18 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                             <td style={SUMMARY_TD}>{a.product_name}</td>
                             <td style={{ ...SUMMARY_TD, color: 'var(--text-3)' }}>{a.spec || '-'}</td>
                             <td style={{ ...SUMMARY_TD, color: 'var(--text-3)' }}>{a.vendor || '미상'}</td>
+                            <td style={{ ...SUMMARY_TD, textAlign: 'right' }}>
+                              {a.current_stock < 0 ? (
+                                <span style={{
+                                  display: 'inline-block', padding: '2px 7px', borderRadius: '6px',
+                                  background: 'var(--danger)', color: '#fff', fontWeight: 800,
+                                }}>
+                                  {a.current_stock}개
+                                </span>
+                              ) : (
+                                <span style={{ fontWeight: a.current_stock === 0 ? 700 : 400 }}>{a.current_stock}개</span>
+                              )}
+                            </td>
                             <td style={{ ...SUMMARY_TD, textAlign: 'right', fontWeight: 700 }}>
                               {qty === '' ? '-' : formatQtyWithBox(qty, a.spec)}
                             </td>

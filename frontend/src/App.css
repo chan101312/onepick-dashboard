@@ -402,6 +402,27 @@ body {
 
 /* 🔄 검색/로딩 중 회전 스피너 */
 @keyframes searchSpin { to { transform: rotate(360deg); } }
+
+/* 재발주 탭: 데이터 재조회/필터 변경 중 화면 중앙 큰 로딩 스피너 */
+.reorder-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  backdrop-filter: blur(1.5px);
+}
+.reorder-big-spinner {
+  width: 64px;
+  height: 64px;
+  border: 6px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: searchSpin 0.8s linear infinite;
+}
+
 .searchSpinner {
   display: inline-block;
   width: 22px;

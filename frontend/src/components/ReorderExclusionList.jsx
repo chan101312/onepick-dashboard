@@ -69,6 +69,12 @@ export default function ReorderExclusionList() {
 
   return (
     <div>
+      {isLoading && (
+        <div className="reorder-loading-overlay">
+          <div className="reorder-big-spinner" />
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
         <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)' }}>
           당일매입형으로 지정돼 재발주 알림에서 제외된 상품 목록입니다. "제외 해제"하면 다시 발주 대상에 포함됩니다.
