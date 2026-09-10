@@ -51,11 +51,7 @@ EXCLUDED_NAME_KEYWORDS = ['택배비', '배송비', '아이스팩', '스티로�
 SOLD_OUT_STALE_DAYS = 30  # 품절 + 이 기간 넘게 안 팔렸으면 알림 대신 데드스톡으로 분류
 SLOW_MOVING_DAYS = 60     # 재고 있음 + 이 기간 넘게 안 팔렸으면 데드스톡으로 분류
 SALES_LOOKBACK_DAYS = max(SALES_CYCLE_OPTIONS)  # saleticketlist 조회 시 미리 긁어올 최대 기간 (30일)
-VENDOR_LOOKBACK_DAYS = 90  # 매입처 필터 목록 기준: 지금 재발주가 필요한 상품인지와 무관하게 최근 3개월 실거래 기준으로 판단
-# 최근 90일 매입 전표 라인이 이 건수 미만인 매입처는 필터 목록에서 뺀다. 1~2건짜리 일회성 매입
-# (예: 급하게 한 번 사온 곳)까지 다 뜨면 "(0)" 탭이 20개 넘게 쌓여 목록이 복잡해지기 때문.
-# 단, 지금 재발주 알림이 걸린 매입처는 건수와 무관하게 프론트에서 계속 노출된다(vendorCounts 합집합).
-MIN_VENDOR_PURCHASE_LINES = 3
+VENDOR_LOOKBACK_DAYS = 90  # _fetch_recent_vendor_data가 상품→매입처 매핑(vendor_by_name)을 만들 때 보는 기간
 
 
 class ReorderConfigIn(BaseModel):
@@ -557,10 +553,7 @@ def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None
         vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
 
     vendor_by_name = {name: max(counts, key=counts.get) for name, counts in name_vendor_counts.items()}
-    all_vendors = [
-        v for v, cnt in sorted(vendor_counts.items(), key=lambda kv: -kv[1])
-        if cnt >= MIN_VENDOR_PURCHASE_LINES
-    ]
+    all_vendors = [v for v, _ in sorted(vendor_counts.items(), key=lambda kv: -kv[1])]
     return vendor_by_name, all_vendors
 
 

@@ -133,7 +133,6 @@ function sortAlerts(list, sortMode) {
 function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [alerts, setAlerts] = useState([]);
   const [deadstocks, setDeadstocks] = useState([]);
-  const [recentVendors, setRecentVendors] = useState([]); // 최근 3개월 내 실거래가 있는 매입처 전체 (재발주 대상 상품 여부와 무관)
   const [lastUpdated, setLastUpdated] = useState('');
   const [dataSource, setDataSource] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -225,14 +224,12 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         setErrorMsg(result.error);
         setAlerts([]);
         setDeadstocks([]);
-        setRecentVendors([]);
         setLastUpdated('');
         setDataSource('');
       } else {
         setErrorMsg('');
         setAlerts(Array.isArray(result.alerts) ? result.alerts : []);
         setDeadstocks(Array.isArray(result.deadstocks) ? result.deadstocks : []);
-        setRecentVendors(Array.isArray(result.vendors) ? result.vendors : []);
         setLastUpdated(result.last_updated || '');
         setDataSource(result.data_source || '');
         setQtyOverrides({});
@@ -367,10 +364,13 @@ function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     acc[v] = (acc[v] || 0) + 1;
     return acc;
   }, {});
-  // 재발주 알림에 지금 등장하는 매입처(vendorCounts)만 보여주면, 최근 실거래는 있어도 지금 재고가
-  // 넉넉해 알림 대상이 아닌 상품의 매입처(예: 조은수산)는 필터에 아예 안 뜨는 문제가 있었다.
-  // 그래서 최근 3개월 내 실거래 매입처 전체(recentVendors, 백엔드 saleticketlist 직접 조회)를 합쳐서 보여준다.
-  const vendorTabs = Array.from(new Set([...Object.keys(vendorCounts), ...recentVendors]))
+  // 지금 재발주 알림이 있는 매입처만 필터 탭으로 보여준다. (최근 매입은 있지만 현재 알림이 0건인
+  // 매입처까지 "(N)"으로 나열하면 목록이 20개 넘게 불어나 오히려 파악이 어려웠다.)
+  // 단, 지금 선택돼 있는 매입처는 현재 tier에서 알림이 0건이어도 남겨서 선택이 사라지지 않게 한다.
+  const vendorTabs = Array.from(new Set([
+    ...Object.keys(vendorCounts),
+    ...(vendorMode !== 'all' ? [vendorMode] : []),
+  ]))
     .map((v) => [v, vendorCounts[v] || 0])
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ko'));
 
