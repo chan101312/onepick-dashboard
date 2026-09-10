@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../apiBase';
-import { signature } from './reorderAlertUtils';
+import { signature, parseBoxUnit, formatQtyWithBox } from './reorderAlertUtils';
 import Pagination from './Pagination';
 import { Emoji, EmojiText } from './Icons';
+import ReorderExclusionList from './ReorderExclusionList';
 
 // 시급도 배지(URGENT/WARNING/NOTICE)는 지금처럼 진한 빨강/주황/회색 계열을 유지한다 — 이건 문제없었음.
 // 카드 배경은 더 이상 시급도 색으로 물들이지 않는다: 카드가 5~60개씩 쌓이면 배경색이 화면 전체를
@@ -56,6 +57,14 @@ const SOLD_OUT_BG = '#475569'; // 라이트/다크 테마 공통 고정값(slate
 const ACTION_CHIP_BG = '#E3F2FD';
 const ACTION_CHIP_TEXT = '#1565C0';
 const ACTION_CHIP_BORDER = 'rgba(21, 101, 192, 0.35)';
+
+// 간결 요약 보기(표 형태)용 셀 스타일 — 카드 뷰와 별개로, 136개를 한눈에 훑는 밀도로 맞춘다.
+const SUMMARY_TH = {
+  padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: 'var(--text-3)',
+  fontSize: '12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+  position: 'sticky', top: 0, background: 'var(--surface-2)', zIndex: 1,
+};
+const SUMMARY_TD = { padding: '6px 10px', color: 'var(--text)', verticalAlign: 'top' };
 
 const SORT_OPTIONS = [
   { key: 'stock_asc', label: '재고 적은 순' },
@@ -121,7 +130,7 @@ function sortAlerts(list, sortMode) {
   return arr;
 }
 
-export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
+function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [alerts, setAlerts] = useState([]);
   const [deadstocks, setDeadstocks] = useState([]);
   const [recentVendors, setRecentVendors] = useState([]); // 최근 3개월 내 실거래가 있는 매입처 전체 (재발주 대상 상품 여부와 무관)
@@ -146,6 +155,10 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
   const [orderSheetText, setOrderSheetText] = useState('');
   const [orderSheetOpen, setOrderSheetOpen] = useState(false);
   const [orderSheetCopyMsg, setOrderSheetCopyMsg] = useState('');
+  const [viewMode, setViewMode] = useState('cards');           // 'cards' | 'summary' — 기본은 기존 카드 뷰 유지
+  const [summaryFormat, setSummaryFormat] = useState('table');  // 'table' | 'text'
+  const [summaryCopyMsg, setSummaryCopyMsg] = useState('');
+  const [excludeMsg, setExcludeMsg] = useState(null); // { type: 'ok' | 'error', text }
 
   useEffect(() => {
     (async () => {
@@ -470,6 +483,88 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
     fetchAlerts();
   };
 
+  // 요약-표 보기의 개별 "제외" 버튼: 해당 상품을 당일매입형(on_demand=true)으로 지정한다.
+  // alerts에서 먼저 낙관적으로 제거 → 표/카드 뷰가 즉시 갱신되고, 저장 실패 시에만 되돌려 재조회한다.
+  const handleExclude = async (alert) => {
+    if (!window.confirm(`[${alert.product_name}]을(를) 당일매입형으로 지정해 재발주 알림에서 제외할까요?\n"제외목록" 탭에서 언제든 되돌릴 수 있습니다.`)) return;
+    setExcludeMsg(null);
+    setAlerts((prev) => prev.filter((a) => a.product_name !== alert.product_name));
+    if (selectedIds[alert.id]) {
+      const nextSel = { ...selectedIds };
+      delete nextSel[alert.id];
+      persistSelected(nextSel);
+    }
+    const rollback = (text) => {
+      setExcludeMsg({ type: 'error', text });
+      fetchAlerts(); // 저장 실패 → 낙관적 제거를 되돌린다(서버 재조회)
+    };
+    try {
+      const res = await fetch(`${API_BASE}/api/reorder/on-demand`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_name: alert.product_name, on_demand: true }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 404) {
+        rollback('제외 저장 실패: 백엔드에 /api/reorder/on-demand 엔드포인트가 없습니다. 서버를 최신 코드로 재시작해주세요.');
+        return;
+      }
+      if (!res.ok || result.status !== 'success') {
+        rollback(`제외 저장 실패: ${result.message || `HTTP ${res.status}`}`);
+        return;
+      }
+      setExcludeMsg({ type: 'ok', text: `[${alert.product_name}] 제외됨 — "제외목록" 탭에서 되돌릴 수 있어요` });
+    } catch (e) {
+      rollback(`제외 저장 실패: 서버에 연결할 수 없습니다. (${e.message})`);
+    }
+  };
+
+  // ── 간결 요약 보기: 지금 필터된 상품(sortedAlerts) 전체를 매입처별로 묶어 한눈에 본다.
+  //    필터(전체/많이팔림/덜팔림, 매입처)는 이미 sortedAlerts에 반영돼 있으므로 그대로 사용한다.
+  //    매입처 그룹 순서: 긴급 건수 많은 순 → 총 건수 순 → 가나다.
+  //    그룹 안: 긴급 > 주의 > 참고 순 (동순위는 현재 정렬 기준 유지 — Array.sort는 안정 정렬).
+  const summaryGroups = (() => {
+    const rank = { urgent: 0, warning: 1, notice: 2 };
+    const byVendor = new Map();
+    sortedAlerts.forEach((a) => {
+      const v = a.vendor || '매입처 미상';
+      if (!byVendor.has(v)) byVendor.set(v, []);
+      byVendor.get(v).push(a);
+    });
+    return Array.from(byVendor.entries())
+      .map(([vendor, items]) => ({
+        vendor,
+        items: [...items].sort((x, y) => (rank[x.urgency] ?? 3) - (rank[y.urgency] ?? 3)),
+        urgentCount: items.filter((i) => i.urgency === 'urgent').length,
+        total: items.length,
+      }))
+      .sort((a, b) => b.urgentCount - a.urgentCount || b.total - a.total || a.vendor.localeCompare(b.vendor, 'ko'));
+  })();
+
+  // 텍스트 보기: 매입처에 그대로 복사해 보낼 수 있게 내부 표시(건수/긴급도) 없이 "상품명 규격 x 수량"만.
+  //  기존 '발주서 생성'(generateOrderSheet)과 같은 포맷 — 차이는 선택 없이 필터된 전체를 대상으로 한다는 점뿐.
+  const summaryText = summaryGroups
+    .map(({ vendor, items }) => {
+      const lines = items.map((a) => {
+        const spec = a.spec ? ` ${a.spec}` : '';
+        const raw = getQtyValue(a);
+        const qty = raw === '' || Number.isNaN(Number(raw)) ? 0 : Number(raw);
+        const boxUnit = parseBoxUnit(a.spec);
+        const boxSuffix = boxUnit ? ` (${Math.ceil(qty / boxUnit)}박스)` : '';
+        return `${a.product_name}${spec} x ${qty}${boxSuffix}`;
+      });
+      return `[${vendor}]\n${lines.join('\n')}`;
+    })
+    .join('\n\n');
+
+  const copySummaryText = () => {
+    if (!summaryText || !navigator.clipboard?.writeText) return;
+    navigator.clipboard.writeText(summaryText).then(() => {
+      setSummaryCopyMsg('복사되었어요!');
+      setTimeout(() => setSummaryCopyMsg(''), 2000);
+    });
+  };
+
   return (
     <div className="reorder-alert-wrap">
       <div className={`reorder-status-row ${isStale ? 'reorder-status-stale' : 'reorder-status-ok'}`}>
@@ -599,6 +694,28 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         </div>
       )}
 
+      <div style={{ display: 'flex', gap: '8px', margin: '10px 0', flexWrap: 'wrap' }}>
+        {[['cards', '🗂 카드 보기'], ['summary', '📋 요약 보기']].map(([key, label]) => {
+          const active = viewMode === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setViewMode(key)}
+              style={{
+                padding: '8px 16px', borderRadius: '999px', fontSize: '13px', cursor: 'pointer',
+                border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-3)', fontWeight: active ? 700 : 400,
+              }}
+            >
+              <EmojiText text={label} />
+            </button>
+          );
+        })}
+      </div>
+
+      {viewMode === 'cards' ? (
+        <>
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
@@ -823,11 +940,7 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                 <div style={{ background: isNegative ? 'var(--danger)' : isZeroStock ? SOLD_OUT_BG : CHIP_BG, borderRadius: '8px', padding: '6px 10px' }}>
                   <div className={isSoldOut ? 'reorder-alert-chip-label' : undefined} style={{ fontSize: '10px', color: isSoldOut ? 'rgba(255,255,255,0.85)' : 'var(--text-3)', marginBottom: '2px' }}>
-                    {isNegative
-                      ? <EmojiText text="⚠️ 재고 마이너스(초과판매)" size={11} />
-                      : isZeroStock
-                        ? <EmojiText text="⚠️ 품절" size={11} />
-                        : '현재 재고'}
+                    현재 재고
                   </div>
                   <div className={isSoldOut ? 'reorder-alert-chip-value' : undefined} style={{ fontSize: '16px', fontWeight: 800, color: isSoldOut ? '#fff' : 'var(--text)' }}>
                     {alert.current_stock}개
@@ -850,6 +963,17 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
                     />
                     <span className="reorder-qty-unit" style={{ fontSize: '12px', color: ACTION_CHIP_TEXT }}>개</span>
                   </div>
+                  {(() => {
+                    // 규격에서 박스당 수량을 못 뽑으면(치수 규격 등) 박스 줄 자체를 숨긴다.
+                    const boxUnit = parseBoxUnit(alert.spec);
+                    const raw = getQtyValue(alert);
+                    if (!boxUnit || raw === '' || Number.isNaN(Number(raw))) return null;
+                    return (
+                      <div style={{ fontSize: '11px', color: ACTION_CHIP_TEXT, opacity: 0.8, marginTop: '2px' }}>
+                        ≈ {Math.ceil(Number(raw) / boxUnit)}박스 <span style={{ opacity: 0.7 }}>(박스당 {boxUnit}개)</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -875,6 +999,155 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
         })}
       </div>
       <Pagination currentPage={alertPage} totalPages={alertTotalPages} onPageChange={setAlertPage} />
+        </>
+      ) : (
+        <div style={{ margin: '8px 0' }}>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {[['table', '표 보기'], ['text', '텍스트 보기']].map(([key, label]) => {
+              const active = summaryFormat === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSummaryFormat(key)}
+                  style={{
+                    padding: '6px 14px', borderRadius: '999px', fontSize: '12px', cursor: 'pointer',
+                    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: active ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'transparent',
+                    color: active ? 'var(--text)' : 'var(--text-3)', fontWeight: active ? 700 : 400,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+              지금 필터된 {sortedAlerts.length}개 · 매입처 {summaryGroups.length}곳
+            </span>
+          </div>
+
+          {excludeMsg && (
+            <div
+              style={{
+                margin: '0 0 12px 0', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: '8px',
+                color: excludeMsg.type === 'error' ? 'var(--danger)' : 'var(--success)',
+                background: excludeMsg.type === 'error'
+                  ? 'color-mix(in srgb, var(--danger) 10%, transparent)'
+                  : 'color-mix(in srgb, var(--success) 10%, transparent)',
+                border: `1px solid color-mix(in srgb, ${excludeMsg.type === 'error' ? 'var(--danger)' : 'var(--success)'} 35%, transparent)`,
+              }}
+            >
+              <span style={{ flex: 1 }}>{excludeMsg.text}</span>
+              <button
+                onClick={() => setExcludeMsg(null)}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
+                title="닫기"
+              >
+                <Emoji>✕</Emoji>
+              </button>
+            </div>
+          )}
+
+          {sortedAlerts.length === 0 ? (
+            <p style={{ fontSize: '13px', color: 'var(--text-3)' }}>현재 필터에 해당하는 상품이 없습니다.</p>
+          ) : summaryFormat === 'table' ? (
+            <div style={{ maxHeight: '70vh', overflow: 'auto', border: '1px solid var(--border)', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr>
+                    <th style={SUMMARY_TH}>상품명</th>
+                    <th style={SUMMARY_TH}>규격</th>
+                    <th style={SUMMARY_TH}>매입처</th>
+                    <th style={{ ...SUMMARY_TH, textAlign: 'right' }}>제안발주량</th>
+                    <th style={SUMMARY_TH}>긴급도</th>
+                    <th style={{ ...SUMMARY_TH, textAlign: 'center' }}>제외</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryGroups.map((g) => (
+                    <React.Fragment key={g.vendor}>
+                      <tr>
+                        <td
+                          colSpan={6}
+                          style={{
+                            padding: '7px 10px', fontWeight: 700, color: 'var(--text)',
+                            background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                            borderTop: '1px solid var(--border)',
+                          }}
+                        >
+                          ▍{g.vendor}{' '}
+                          <span style={{ fontWeight: 400, color: 'var(--text-3)', fontSize: '12px' }}>
+                            ({g.total}건{g.urgentCount > 0 ? ` · 긴급 ${g.urgentCount}` : ''})
+                          </span>
+                        </td>
+                      </tr>
+                      {g.items.map((a) => {
+                        const cfg = URGENCY_CONFIG[a.urgency] || URGENCY_CONFIG.notice;
+                        const qty = getQtyValue(a);
+                        return (
+                          <tr key={a.id} style={{ borderTop: '1px solid var(--border)' }}>
+                            <td style={SUMMARY_TD}>{a.product_name}</td>
+                            <td style={{ ...SUMMARY_TD, color: 'var(--text-3)' }}>{a.spec || '-'}</td>
+                            <td style={{ ...SUMMARY_TD, color: 'var(--text-3)' }}>{a.vendor || '미상'}</td>
+                            <td style={{ ...SUMMARY_TD, textAlign: 'right', fontWeight: 700 }}>
+                              {qty === '' ? '-' : formatQtyWithBox(qty, a.spec)}
+                            </td>
+                            <td style={SUMMARY_TD}>
+                              <span
+                                style={{
+                                  display: 'inline-block', padding: '2px 8px', borderRadius: '999px',
+                                  fontSize: '11px', fontWeight: 700,
+                                  background: cfg.pillBg === 'transparent' ? 'var(--surface-2)' : cfg.pillBg,
+                                  color: cfg.pillBg === 'transparent' ? 'var(--text-3)' : cfg.pillText,
+                                  border: cfg.pillBg === 'transparent' ? '1px solid var(--border)' : 'none',
+                                }}
+                              >
+                                {cfg.badgeLabel}
+                              </span>
+                            </td>
+                            <td style={{ ...SUMMARY_TD, textAlign: 'center' }}>
+                              <button
+                                onClick={() => handleExclude(a)}
+                                className="tab-icon-btn"
+                                style={{ padding: '3px 10px', fontSize: '11px', border: '1px solid var(--border)', color: 'var(--text-3)' }}
+                                title="이 상품을 당일매입형으로 지정해 재발주 알림에서 제외합니다 (제외목록 탭에서 되돌리기 가능)"
+                              >
+                                제외
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
+                <button onClick={copySummaryText} className="tab-icon-btn" style={{ fontWeight: 700 }}>
+                  <EmojiText text="📋 전체 복사" />
+                </button>
+                <span style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+                  매입처별로 묶인 발주 목록 — 그대로 복사해 보낼 수 있어요
+                </span>
+                {summaryCopyMsg && <span style={{ color: 'var(--success)', fontSize: '12px' }}>{summaryCopyMsg}</span>}
+              </div>
+              <textarea
+                readOnly
+                value={summaryText}
+                rows={Math.min(30, summaryText.split('\n').length + 1)}
+                style={{
+                  width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'monospace',
+                  fontSize: '13px', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)',
+                  background: 'var(--surface-2)', color: 'var(--text)',
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {deadstocks.length > 0 && (
         <div className="reorder-deadstock-wrap">
@@ -903,6 +1176,47 @@ export default function ReorderAlertBanner({ onUrgentCountChange } = {}) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// 재발주 탭 = [재발주 알림] + [제외목록] 서브탭 래퍼.
+// 기존 알림 화면(ReorderAlertBanner)은 그대로 두고, 여기서 서브탭만 얹는다.
+const SUB_TABS = [
+  { key: 'alerts', label: '🔔 재발주 알림' },
+  { key: 'exclusions', label: '🚫 제외목록' },
+];
+
+export default function ReorderTabPage({ onUrgentCountChange } = {}) {
+  const [subTab, setSubTab] = useState('alerts');
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        {SUB_TABS.map((t) => {
+          const active = subTab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSubTab(t.key)}
+              style={{
+                padding: '8px 18px', borderRadius: '999px', fontSize: '14px', cursor: 'pointer',
+                border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
+                color: active ? 'var(--accent)' : 'var(--text-3)', fontWeight: active ? 700 : 400,
+              }}
+            >
+              <EmojiText text={t.label} />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 알림 화면은 언제나 마운트해 두고(뱃지 카운트/데이터 유지), 제외목록만 토글로 전환 */}
+      <div hidden={subTab !== 'alerts'}>
+        <ReorderAlertBanner onUrgentCountChange={onUrgentCountChange} />
+      </div>
+      {subTab === 'exclusions' && <ReorderExclusionList />}
     </div>
   );
 }
