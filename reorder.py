@@ -529,7 +529,9 @@ def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None
         conn.close()
 
     cutoff_int = int((date.today() - timedelta(days=VENDOR_LOOKBACK_DAYS)).strftime("%Y%m%d"))
-    name_vendor_counts: dict[str, dict[str, int]] = {}
+    # 상품별로 여러 매입처에서 사왔을 때: "가장 최근에 매입한 매입처"를 그 상품의 매입처로 본다.
+    # (거래 횟수 최다로 뽑으면, 요즘은 A사에서 사는데 예전에 B사에서 자주 산 이력 때문에 B사로 잘못 잡힘.)
+    name_latest: dict[str, tuple[str, str]] = {}  # name -> (YYYYMMDD, vendor)
     vendor_counts: dict[str, int] = {}
 
     for raw_name, raw_vendor, raw_date, raw_state in rows:
@@ -542,17 +544,19 @@ def _fetch_recent_vendor_data() -> tuple[dict[str, str] | None, list[str] | None
             continue
 
         date_str = _safe_decode(raw_date).replace("-", "").replace(".", "").replace("/", "")
+        d8 = date_str[:8]
         try:
-            if int(date_str[:8]) < cutoff_int:
+            if int(d8) < cutoff_int:
                 continue
         except Exception:
             continue
 
-        name_vendor_counts.setdefault(name, {})
-        name_vendor_counts[name][vendor] = name_vendor_counts[name].get(vendor, 0) + 1
+        prev = name_latest.get(name)
+        if prev is None or d8 > prev[0]:
+            name_latest[name] = (d8, vendor)
         vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
 
-    vendor_by_name = {name: max(counts, key=counts.get) for name, counts in name_vendor_counts.items()}
+    vendor_by_name = {name: v for name, (_, v) in name_latest.items()}
     all_vendors = [v for v, _ in sorted(vendor_counts.items(), key=lambda kv: -kv[1])]
     return vendor_by_name, all_vendors
 
