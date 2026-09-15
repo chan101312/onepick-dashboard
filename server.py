@@ -1494,8 +1494,18 @@ def _pool_match_by_core(pool, esangin_core_name):
     return None
 
 
+# 키워드 전체기간 검색 시 실제로 훑을 기간의 상한(일). 채널 쪽(특히 네이버)이 날짜 범위를
+# 하루 단위로 쪼개서 순차 API 호출을 하는 구조라, 무제한으로 열어두면 응답이 너무 느려지고
+# 레이트리밋에 걸릴 수 있어 상한을 둔다. E상인 saleticketlist 쪽은 어차피 항상 전체 스캔이라
+# 이 상한과 무관하게 비용이 동일함(_fetch_esangin_sales_by_date 참고).
+# 2026-09-15 실측(prod, 실제 채널 데이터): 3일=22.8s, 7일=30.4s, 14일=40.3s, 30일=69.6s,
+# 90일=524(Cloudflare Quick Tunnel이 약 100초에서 강제 종료) — 애초 90일로 잡았다가 이 실측
+# 결과로 30일로 낮춤. 30일 요청은 프론트 로딩 스피너를 감안해도 수용 가능한 수준.
+ORDER_RECONCILE_KEYWORD_SEARCH_DAYS = 30
+
+
 @app.get("/api/order-reconcile")
-def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_date: str = Query(None)):
+def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_date: str = Query(None), keyword: str = Query(None)):
     """
     채널(쿠팡/네이버)의 지정 기간 주문과 E상인 saleticketlist를 상품명 토큰 기준으로
     대조해서, 온라인에서 팔렸는데 E상인에 판매전표 입력이 빠진 것으로 의심되는 건을 찾는다.
@@ -1506,10 +1516,19 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
 
     기간 파라미터: start_date/end_date를 우선 사용. start_date만 오면 end_date=start_date.
     둘 다 없으면 기존 date(하위호환, 하루만) → 그것도 없으면 오늘 하루.
+
+    keyword가 오면 상품명 키워드 최근 ORDER_RECONCILE_KEYWORD_SEARCH_DAYS일 검색 모드:
+    화면에 설정된 start_date/end_date는 무시하고 (오늘 - ORDER_RECONCILE_KEYWORD_SEARCH_DAYS)
+    ~오늘로 강제한 뒤, 매칭 로직은 동일하게 돌리고 마지막에 상품명에 keyword가 포함된
+    항목만 걸러서 반환한다.
     """
     import datetime
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    if start_date or end_date:
+    keyword = (keyword or "").strip()
+    if keyword:
+        target_start = (datetime.date.today() - datetime.timedelta(days=ORDER_RECONCILE_KEYWORD_SEARCH_DAYS)).strftime("%Y-%m-%d")
+        target_end = today_str
+    elif start_date or end_date:
         target_start = (start_date or end_date or "").strip()
         target_end = (end_date or target_start).strip()
     else:
@@ -1721,6 +1740,17 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
     # 배민상회 — 공식 API가 없어 자동 대조 대상 자체가 아님 (재고 실사 탭에서 수동으로 확인)
     channel_notes["배민상회"] = {"status": "manual_only", "message": "공식 API가 없어 자동 대조 불가 — 수동으로 확인해주세요."}
 
+    if keyword:
+        # 키워드 검색 모드: 주문 하나에 상품이 여러 개면 그중 키워드에 안 걸리는 항목은 빼고,
+        # 걸리는 항목이 하나도 없으면 주문 자체를 결과에서 제외한다.
+        keyword_lower = keyword.lower()
+        filtered_missing = []
+        for order in missing:
+            matched_items = [it for it in order["items"] if keyword_lower in str(it.get("product_name", "")).lower()]
+            if matched_items:
+                filtered_missing.append({**order, "items": matched_items})
+        missing = filtered_missing
+
     return {
         "status": "success",
         "date": target_start,  # 하위호환용 — start와 동일한 값
@@ -1729,6 +1759,7 @@ def order_reconcile(date: str = Query(None), start_date: str = Query(None), end_
         "matched_count": matched_count,
         "missing_count": len(missing),
         "channel_notes": channel_notes,
+        "keyword": keyword or None,
     }
 
 

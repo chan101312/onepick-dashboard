@@ -68,6 +68,13 @@ export default function StockReconcileTab() {
   const [checked, setChecked] = useState(loadChecked);
   const [expandedDates, setExpandedDates] = useState({});
 
+  // --- 기능 A-1: 상품명 키워드 전체기간(최근 30일) 검색 ---
+  const [searchInput, setSearchInput] = useState('');
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchErrorMsg, setSearchErrorMsg] = useState('');
+
   // --- 기능 B: 채널 동기화 미리보기 ---
   const [syncLog, setSyncLog] = useState([]);
   const [isLoadingSync, setIsLoadingSync] = useState(false);
@@ -100,6 +107,39 @@ export default function StockReconcileTab() {
     }
     setIsLoadingOrders(false);
   }, []);
+
+  const fetchKeywordSearch = useCallback(async (keyword) => {
+    const trimmed = keyword.trim();
+    if (!trimmed) return;
+    setIsSearching(true);
+    setSearchKeyword(trimmed);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/order-reconcile?keyword=${encodeURIComponent(trimmed)}`,
+        { headers: { 'ngrok-skip-browser-warning': '69420' } }
+      );
+      const result = await res.json();
+      if (result.status === 'success') {
+        setSearchResults(Array.isArray(result.missing) ? result.missing : []);
+        setSearchErrorMsg('');
+      } else {
+        setSearchResults([]);
+        setSearchErrorMsg(result.message || '검색에 실패했습니다.');
+      }
+    } catch (e) {
+      console.error('상품명 검색 실패', e);
+      setSearchResults([]);
+      setSearchErrorMsg('검색에 실패했습니다. 서버 연결을 확인해주세요.');
+    }
+    setIsSearching(false);
+  }, []);
+
+  const clearSearch = () => {
+    setSearchInput('');
+    setSearchKeyword('');
+    setSearchResults([]);
+    setSearchErrorMsg('');
+  };
 
   const fetchSyncPreview = useCallback(async () => {
     setIsLoadingSync(true);
@@ -184,8 +224,102 @@ export default function StockReconcileTab() {
     setExpandedDates((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
   };
 
+  const renderOrderCard = (order, i) => {
+    const dateKey = order.ordered_at ? String(order.ordered_at).slice(0, 10) : '';
+    const channelCfg = CHANNEL_BADGE[order.channel] || DEFAULT_BADGE;
+    const confCfg = CONFIDENCE_CARD[orderCardConfidence(order.items || [])];
+    const entryKey = `${order.channel}-${order.order_id}-${order.ordered_at || ''}`;
+    const isChecked = !!checked[entryKey];
+    const items = Array.isArray(order.items) ? order.items : [];
+    return (
+      <div
+        key={entryKey || i}
+        className="reorder-alert-row"
+        style={{
+          background: confCfg.bg,
+          border: `1px solid ${confCfg.border}`,
+          padding: '7px 12px',
+          opacity: isChecked ? 0.5 : 1,
+        }}
+      >
+        <div className="reorder-alert-msg" style={{ gap: '8px' }}>
+          <span className="channel-badge" style={{ background: channelCfg.border }}>{order.channel}</span>
+          <div className="reorder-alert-body" style={{ gap: 0, textDecoration: isChecked ? 'line-through' : 'none' }}>
+            {items.map((it, j) => (
+              <span key={j} style={{ display: 'block' }}>
+                <span className="reorder-alert-text" style={{ fontSize: '13px' }}>[{it.product_name}]</span>
+                <span className="reorder-alert-sub"> ×{it.qty}</span>
+                {it.receiver_name && <span className="reorder-alert-sub"> - {it.receiver_name}</span>}
+                <span className={`confidence-badge confidence-${it.confidence === 'high' ? 'high' : 'medium'}`} style={{ marginLeft: '6px' }}>
+                  {it.confidence === 'high' ? '높음' : '중간'}
+                </span>
+              </span>
+            ))}
+            <span className="reorder-alert-sub">
+              {shortDateLabel(dateKey)} · 주문번호 {order.order_id || '-'}
+            </span>
+          </div>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+          <input type="checkbox" checked={isChecked} onChange={() => toggleChecked(entryKey, items)} />
+          E상인에 입력함
+        </label>
+      </div>
+    );
+  };
+
   return (
     <div className="reorder-alert-wrap">
+      {/* ===== 기능 A-1: 상품명 키워드 전체기간 검색 ===== */}
+      <div className="reorder-status-row reorder-status-ok">
+        <span><Emoji>🔍</Emoji> 상품명 검색 (최근 30일 전체기간, 화면 날짜 범위와 무관)</span>
+        <form
+          style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}
+          onSubmit={(e) => { e.preventDefault(); fetchKeywordSearch(searchInput); }}
+        >
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="상품명으로 검색..."
+            style={{ padding: '6px 8px', borderRadius: '8px', minWidth: '160px' }}
+          />
+          <button className="reorder-refresh-btn" type="submit" disabled={isSearching || !searchInput.trim()}>
+            {isSearching ? <><Emoji>🔄</Emoji> 검색 중...</> : <><Emoji>🔍</Emoji> 검색</>}
+          </button>
+          {searchKeyword && (
+            <button className="reorder-refresh-btn" type="button" onClick={clearSearch}>검색 지우기</button>
+          )}
+        </form>
+      </div>
+
+      {searchErrorMsg && (
+        <div className="reorder-status-row reorder-status-empty"><span><Emoji>⚠️</Emoji> {searchErrorMsg}</span></div>
+      )}
+
+      {searchKeyword && !searchErrorMsg && (
+        <>
+          <div className="reorder-summary-row">
+            <span className="reorder-summary-total">
+              {isSearching
+                ? `"${searchKeyword}" 검색 중...`
+                : `"${searchKeyword}" 검색 결과 · 최근 30일 · 미입력 의심 ${searchResults.length}건`}
+            </span>
+          </div>
+          {!isSearching && (
+            searchResults.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '10px' }}>
+                {searchResults.map((order, i) => renderOrderCard(order, i))}
+              </div>
+            ) : (
+              <div className="reorder-status-row reorder-status-empty">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Emoji>✨</Emoji> "{searchKeyword}"에 해당하는 미입력 의심 상품이 없습니다.</span>
+              </div>
+            )
+          )}
+        </>
+      )}
+
       {/* ===== 기능 A: 누락 의심 주문 ===== */}
       <div className="reorder-status-row reorder-status-ok">
         <span><Emoji>🧾</Emoji> 온라인 주문 vs E상인 판매전표 대조</span>
@@ -260,48 +394,7 @@ export default function StockReconcileTab() {
 
               {isExpanded && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '6px' }}>
-                  {orders.map((order, i) => {
-                    const channelCfg = CHANNEL_BADGE[order.channel] || DEFAULT_BADGE;
-                    const confCfg = CONFIDENCE_CARD[orderCardConfidence(order.items || [])];
-                    const entryKey = `${order.channel}-${order.order_id}-${order.ordered_at || ''}`;
-                    const isChecked = !!checked[entryKey];
-                    const items = Array.isArray(order.items) ? order.items : [];
-                    return (
-                      <div
-                        key={entryKey || i}
-                        className="reorder-alert-row"
-                        style={{
-                          background: confCfg.bg,
-                          border: `1px solid ${confCfg.border}`,
-                          padding: '7px 12px',
-                          opacity: isChecked ? 0.5 : 1,
-                        }}
-                      >
-                        <div className="reorder-alert-msg" style={{ gap: '8px' }}>
-                          <span className="channel-badge" style={{ background: channelCfg.border }}>{order.channel}</span>
-                          <div className="reorder-alert-body" style={{ gap: 0, textDecoration: isChecked ? 'line-through' : 'none' }}>
-                            {items.map((it, j) => (
-                              <span key={j} style={{ display: 'block' }}>
-                                <span className="reorder-alert-text" style={{ fontSize: '13px' }}>[{it.product_name}]</span>
-                                <span className="reorder-alert-sub"> ×{it.qty}</span>
-                                {it.receiver_name && <span className="reorder-alert-sub"> - {it.receiver_name}</span>}
-                                <span className={`confidence-badge confidence-${it.confidence === 'high' ? 'high' : 'medium'}`} style={{ marginLeft: '6px' }}>
-                                  {it.confidence === 'high' ? '높음' : '중간'}
-                                </span>
-                              </span>
-                            ))}
-                            <span className="reorder-alert-sub">
-                              {shortDateLabel(dateKey)} · 주문번호 {order.order_id || '-'}
-                            </span>
-                          </div>
-                        </div>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', whiteSpace: 'nowrap', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={isChecked} onChange={() => toggleChecked(entryKey, items)} />
-                          E상인에 입력함
-                        </label>
-                      </div>
-                    );
-                  })}
+                  {orders.map((order, i) => renderOrderCard(order, i))}
                 </div>
               )}
             </div>
