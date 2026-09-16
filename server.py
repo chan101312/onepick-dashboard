@@ -676,44 +676,56 @@ def get_top5_orders():
         )
         with conn.cursor() as cursor:
             # 💡 [진짜 정답 복구] 대표님이 찾아주셨던 saleticketlist 테이블에서 날짜(STLDate)까지 가져옵니다!
+            # STLJPOutDanga(건별 실제 판매단가)/STLState(매출·매입 구분)를 수익순 정렬용으로 추가.
             try:
-                sql = "SELECT STLUTSangHo, STLJPName, STLJPSu, STLDate FROM `saleticketlist` WHERE STLJPName IS NOT NULL AND STLJPName != ''"
+                sql = "SELECT STLUTSangHo, STLJPName, STLJPSu, STLDate, STLJPOutDanga, STLState FROM `saleticketlist` WHERE STLJPName IS NOT NULL AND STLJPName != ''"
                 cursor.execute(sql)
             except:
                 # 혹시 수량 컬럼이 다를 경우를 대비한 백업 쿼리
-                sql = "SELECT STLUTSangHo, STLJPName, STLSu, STLDate FROM `saleticketlist` WHERE STLJPName IS NOT NULL AND STLJPName != ''"
+                sql = "SELECT STLUTSangHo, STLJPName, STLSu, STLDate, STLJPOutDanga, STLState FROM `saleticketlist` WHERE STLJPName IS NOT NULL AND STLJPName != ''"
                 cursor.execute(sql)
-                
+
             results = cursor.fetchall()
-            
-        # 월별로 데이터를 담을 거대한 바구니 준비
+
+        # 월별로 데이터를 담을 거대한 바구니 준비 (판매수량 + 실제매출액을 나란히 누적)
         market_sales = {}
-        
-        def add_sales(month_key, market, name, qty):
+        market_revenue = {}
+
+        def add_sales(month_key, market, name, qty, revenue):
             if month_key not in market_sales:
-                market_sales[month_key] = {
+                empty_buckets = lambda: {
                     "🟢 스마트스토어 (네이버)": defaultdict(float),
                     "🛵 우아한형제 (배민)": defaultdict(float),
                     "🔴 롯데ON": defaultdict(float),
                     "🥬 식봄": defaultdict(float),
-                    "🚀 쿠팡": defaultdict(float) 
+                    "🚀 쿠팡": defaultdict(float)
                 }
+                market_sales[month_key] = empty_buckets()
+                market_revenue[month_key] = empty_buckets()
             market_sales[month_key][market][name] += qty
-            
+            market_revenue[month_key][market][name] += revenue
+
         for r in results:
             raw_client = r[0]
             raw_name = r[1]
             raw_qty = r[2]
             raw_date = r[3] # 📅 드디어 추가된 날짜 데이터!
-            
+            raw_danga = r[4]
+            raw_state = r[5]
+
             if not raw_client or not raw_name: continue
-            
+
             def safe_decode(val):
                 if isinstance(val, bytes):
                     try: return val.decode('cp949').strip()
                     except: return val.decode('utf-8', errors='ignore').strip()
                 return str(val).strip()
-                
+
+            # saleticketlist는 매출/매입 전표가 한 테이블에 STLState로만 구분돼 섞여 있다
+            # (reorder.py에서 이미 겪은 문제와 동일). 거래처명 매칭으로도 매입 건은 대부분
+            # 걸러지지만, 이번에 실제 판매단가를 새로 끌어오는 김에 명시적으로도 매출만 남긴다.
+            if safe_decode(raw_state).strip() != "매출": continue
+
             client = safe_decode(raw_client)
             client_no_space = client.replace(" ", "").lower()
             name = safe_decode(raw_name).strip()
@@ -727,12 +739,18 @@ def get_top5_orders():
             # 날짜 정제 (20260422 같은 형태에서 '2026-04'만 뽑아냄)
             date_str = safe_decode(raw_date).replace("-", "").replace(".", "").replace("/", "").strip()
             month_key = f"{date_str[:4]}-{date_str[4:6]}" if len(date_str) >= 6 else "기타"
-            
+
             try: qty = float(safe_decode(raw_qty).replace(',', ''))
             except: qty = 0
-            
+
             if qty <= 0: continue
-            
+
+            # 같은 상품도 건별로 판매단가가 다를 수 있어(할인/시세 변동), 평균을 내지 않고
+            # 건별 수량×단가를 그대로 합산한다 — 합산 시점에 이미 수량가중평균과 동일해진다.
+            try: out_danga = float(safe_decode(raw_danga).replace(',', ''))
+            except: out_danga = 0.0
+            revenue = qty * out_danga
+
             # 🎯 거래처 상호명 자동 분류
             target_market = None
             if '스마트스토어' in client_no_space or '네이버' in client_no_space: target_market = "🟢 스마트스토어 (네이버)"
@@ -740,22 +758,107 @@ def get_top5_orders():
             elif '롯데' in client_no_space: target_market = "🔴 롯데ON"
             elif '식봄' in client_no_space: target_market = "🥬 식봄"
             elif '쿠팡' in client_no_space: target_market = "🚀 쿠팡"
-            
+
             if target_market:
                 # 1. 전체 누적 장부에 기록
-                add_sales('all', target_market, name, qty)
+                add_sales('all', target_market, name, qty, revenue)
                 # 2. 해당 월(예: 2026-04) 장부에 따로 기록
                 if month_key != "기타":
-                    add_sales(month_key, target_market, name, qty)
+                    add_sales(month_key, target_market, name, qty, revenue)
+
+        # ==========================================
+        # 💰 수익순 정렬용 — 마진산출장부(현재 메모리에 로드된 current_margin_data) 매칭 준비
+        # E상인 STLJPName은 "[동림]노바시20미" 같은 압축 코드형인데 마진산출장부 "온라인 상품명"은
+        # "동림 노바시새우20미 450gx20개 냉동손질새우 탈각 튀김용 대용량" 같은 문장형이라 완전일치로는
+        # 거의 안 이어진다. order_reconcile(쿠팡/네이버 주문명 ↔ E상인명)에서 이미 이 문제를 풀려고
+        # 만든 _find_best_token_match를 그대로 재사용한다.
+        #
+        # 실제마진 = 실제매출(STLJPOutDanga 기준, 위에서 이미 건별로 정확히 합산됨) - 원가(매입+자재비+
+        # 기타비용+날치알, fee_analysis.py의 fixed_cost 계산과 동일 기준). 마진산출장부 고정 "마진" 값
+        # 대신 이 방식을 쓰면 할인/시세 변동이 실제 판매가에 반영된다.
+        # 원가(매입) 쪽은 여전히 상품 1포장(박스/팩) 단위 금액이고 STLJPSu가 낱개/박스 중 뭘 세는지는
+        # 상품마다 달라 정확한 환산은 불가능 — 매출 쪽과 달리 이 한계는 그대로 남는다(reorder.py도
+        # 동일 한계를 감수).
+        # ==========================================
+        def _parse_ledger_num(v):
+            try:
+                return float(str(v).replace(",", "").strip() or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        margin_names = []
+        margin_cost_by_name = {}
+        for row in (current_margin_data or []):
+            m_name = str(row.get("온라인 상품명") or row.get("상품명") or "").strip()
+            if not m_name:
+                continue
+            cost_value = (
+                _parse_ledger_num(row.get("매입") or row.get("매입가"))
+                + _parse_ledger_num(row.get("자재비"))
+                + _parse_ledger_num(row.get("기타비용"))
+                + _parse_ledger_num(row.get("날치알"))
+            )
+            margin_names.append(m_name)
+            margin_cost_by_name[m_name] = cost_value
+
+        margin_match_cache = {}  # esangin 상품명 -> (matched: bool, cost_per_unit: float) — 월/채널 반복 대조 방지
+
+        def _matched_cost_per_unit(esangin_name):
+            if esangin_name in margin_match_cache:
+                return margin_match_cache[esangin_name]
+            matched, matched_name, _confidence = _find_best_token_match(esangin_name, margin_names)
+            result = (True, margin_cost_by_name[matched_name]) if matched else (False, 0.0)
+            margin_match_cache[esangin_name] = result
+            return result
+
+        # 원가(매입, 포장단위)×수량이 실매출을 과도하게 초과하면 "적자"가 아니라 마진산출장부
+        # 원가가 박스 단위인데 STLJPSu는 낱개를 세는 식의 단위 불일치일 가능성이 높다(실측 사례:
+        # [동림]노바시20미 — 20개들이 박스 원가를 낱개 판매수량에 곱해서 매출보다 훨씬 커짐).
+        # 진짜 적자(약간의 마이너스)와 구분하기 위해 "마이너스 폭이 매출의 50%를 넘는" 명백한
+        # 경우만 걸러서 수익순 후보에서 빼고, 화면엔 "적자"가 아니라 "단위 불일치 의심"으로 따로 보여준다.
+        UNIT_MISMATCH_LOSS_RATIO = 0.5
+
+        def _is_unit_mismatch_suspect(revenue, profit):
+            if revenue > 0:
+                return profit < -UNIT_MISMATCH_LOSS_RATIO * revenue
+            return profit < 0  # 매출 자체가 0/마이너스인데 원가만 잡혀서 마이너스면 비율 계산이 무의미 — 있는 그대로 의심 처리
 
         # 랭킹 정렬 및 결과 정리
         result_data = {}
         for month_key, markets in market_sales.items():
             month_top5 = {}
             for market, sales in markets.items():
+                revenue_by_name = market_revenue[month_key][market]
                 sorted_sales = sorted(sales.items(), key=lambda x: x[1], reverse=True)
-                clean_top5 = [{"name": k, "qty": int(v)} for k, v in sorted_sales if k][:5]
-                if clean_top5: month_top5[market] = clean_top5
+                qty_top5 = [{"name": k, "qty": int(v)} for k, v in sorted_sales if k][:5]
+
+                profit_candidates = []
+                unit_mismatch_suspects = []
+                for name, qty in sales.items():
+                    if not name:
+                        continue
+                    is_matched, cost_per_unit = _matched_cost_per_unit(name)
+                    if not is_matched:
+                        continue  # 마진산출장부에 매칭 안 되는 상품은 원가를 알 수 없으므로 수익순에서 제외
+                    revenue = revenue_by_name.get(name, 0.0)
+                    actual_profit = revenue - cost_per_unit * qty
+                    if _is_unit_mismatch_suspect(revenue, actual_profit):
+                        unit_mismatch_suspects.append((name, qty, actual_profit))
+                        continue  # 수익순 후보에서 제외 — 적자가 아니라 단위 불일치 의심이므로 별도 노출
+                    profit_candidates.append((name, qty, actual_profit))
+                profit_candidates.sort(key=lambda x: x[2], reverse=True)
+                profit_top5 = [{"name": n, "qty": int(q), "profit": int(p)} for n, q, p in profit_candidates[:5]]
+
+                # 가장 심하게 어긋난 것부터 몇 개만 보여준다(전부 보여주면 경고가 아니라 목록이 됨)
+                unit_mismatch_suspects.sort(key=lambda x: x[2])
+                unit_mismatch_top = [{"name": n, "qty": int(q), "profit": int(p)} for n, q, p in unit_mismatch_suspects[:5]]
+
+                if qty_top5 or profit_top5 or unit_mismatch_top:
+                    month_top5[market] = {
+                        "qty_top5": qty_top5,
+                        "profit_top5": profit_top5,
+                        "unit_mismatch_suspects": unit_mismatch_top,
+                    }
             if month_top5: result_data[month_key] = month_top5
 
         # 존재하는 월 목록만 뽑아서 최신순으로 정렬

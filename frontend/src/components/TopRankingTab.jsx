@@ -57,6 +57,7 @@ export default function TopRankingTab() {
   const [rankingData, setRankingData] = useState({});
   const [availableMonths, setAvailableMonths] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState('all');
+  const [sortMode, setSortMode] = useState('qty'); // 'qty' = 많이 팔린 순, 'profit' = 수익순
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -135,26 +136,54 @@ export default function TopRankingTab() {
           </p>
         </div>
 
-        {/* 📅 달력 필터 (드롭다운) */}
-        <select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          style={{
-            padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
-            background: 'var(--surface)', color: 'var(--text)', fontWeight: 'bold', fontSize: '14px',
-            cursor: 'pointer', outline: 'none'
-          }}
-        >
-          <option value="all">📊 전체 누적 매출</option>
-          {availableMonths.map(m => (
-            <option key={m} value={m}>📅 {m.split('-')[0]}년 {m.split('-')[1]}월</option>
-          ))}
-        </select>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {/* 🔀 정렬 기준 토글 */}
+          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+            {[{ key: 'qty', label: '많이 팔린 순' }, { key: 'profit', label: '수익순' }].map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => setSortMode(opt.key)}
+                style={{
+                  padding: '8px 14px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px',
+                  background: sortMode === opt.key ? 'var(--accent)' : 'var(--surface)',
+                  color: sortMode === opt.key ? '#fff' : 'var(--text)'
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 📅 달력 필터 (드롭다운) */}
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            style={{
+              padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text)', fontWeight: 'bold', fontSize: '14px',
+              cursor: 'pointer', outline: 'none'
+            }}
+          >
+            <option value="all">📊 전체 누적 매출</option>
+            {availableMonths.map(m => (
+              <option key={m} value={m}>📅 {m.split('-')[0]}년 {m.split('-')[1]}월</option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      {sortMode === 'profit' && (
+        <p style={{ margin: '-8px 0 16px 0', fontSize: '12px', color: 'var(--text-3)' }}>
+          <Emoji>⚠️</Emoji> 수익순은 E상인에 기록된 실제 판매단가(할인·시세 변동 반영)에서 마진산출장부 원가(매입+자재비+기타비용+날치알)를 뺀 금액입니다.
+          원가는 여전히 포장(박스/팩) 단위 금액이라 박스/낱개 단위 차이가 있는 상품은 실제와 다를 수 있고, 마진산출장부에 매칭되지 않는 상품은 제외됩니다.
+        </p>
+      )}
 
       {/* 💡 카드 영역 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
-        {Object.entries(currentData).filter(([platform]) => !HIDDEN_MARKETS.includes(platform)).map(([platform, items]) => (
+        {Object.entries(currentData).filter(([platform]) => !HIDDEN_MARKETS.includes(platform)).map(([platform, lists]) => {
+          const items = sortMode === 'profit' ? lists.profit_top5 : lists.qty_top5;
+          return (
           <div key={platform} className="ui-card" style={{
             background: 'var(--panel)', border: '1px solid var(--border)',
             borderRadius: '16px', padding: '16px'
@@ -188,8 +217,15 @@ export default function TopRankingTab() {
                         마진 {marginRate.toFixed(1)}%
                       </div>
                     )}
-                    <div style={{ fontWeight: '900', color: 'var(--accent)', fontSize: '14px' }}>
-                      {item.qty}개
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      {sortMode === 'profit' && (
+                        <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '14px' }}>
+                          {item.profit.toLocaleString()}원
+                        </div>
+                      )}
+                      <div style={{ fontWeight: sortMode === 'profit' ? 'normal' : '900', color: sortMode === 'profit' ? 'var(--text-3)' : 'var(--accent)', fontSize: sortMode === 'profit' ? '11px' : '14px' }}>
+                        {item.qty}개
+                      </div>
                     </div>
                   </li>
                   );
@@ -197,11 +233,30 @@ export default function TopRankingTab() {
               </ul>
             ) : (
               <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '14px', background: 'var(--surface)', borderRadius: '16px' }}>
-                이 달에는 판매 기록이 없습니다.
+                {sortMode === 'profit' && lists.qty_top5 && lists.qty_top5.length > 0
+                  ? '마진산출장부에 매칭되는 상품이 없습니다.'
+                  : '이 달에는 판매 기록이 없습니다.'}
+              </div>
+            )}
+
+            {sortMode === 'profit' && lists.unit_mismatch_suspects && lists.unit_mismatch_suspects.length > 0 && (
+              <div style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '12px', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 30%, transparent)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--amber)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Emoji>⚠️</Emoji> 단위 불일치 의심 상품 (수익순 제외됨)
+                </div>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {lists.unit_mismatch_suspects.map((s, i) => (
+                    <li key={i} style={{ fontSize: '11px', color: 'var(--text-3)', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                      <span style={{ whiteSpace: 'nowrap' }}>계산된 마진 {s.profit.toLocaleString()}원 (단위 오차 의심)</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {/* 선택한 달에 아무 데이터도 없을 경우 */}
         {Object.keys(currentData).length === 0 && (
