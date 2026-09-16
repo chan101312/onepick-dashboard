@@ -6,12 +6,26 @@ import requests
 
 # ==========================================
 # ⚙️ 식봄(foodspring) Open API 설정
-# 공식 문서(openapi.foodspring.co.kr/docs) 확보 및 실제 요청으로 검증 완료.
+# 공식 문서: https://openapi.foodspring.co.kr/docs/index.html (Asciidoctor 정적 페이지, /v1/... 는 API
+# 서버 자체라 문서가 아님 — 인증 필터가 경로 존재 여부와 무관하게 API Key 없으면 전부 401을 반환한다).
 # 서명 방식: HMAC-SHA256(API_SECRET, METHOD + PATH_ONLY(쿼리스트링 제외) + TIMESTAMP) → Base64.
 #   ※ 문서 예제(uri = "/v1/goods/100")는 쿼리 없는 케이스만 보여줘서 헷갈렸는데,
 #   실제 검증 결과 쿼리스트링은 서명 대상에서 제외해야 한다(경로만 서명).
 # 인증 헤더: X-API-Key, X-Timestamp(ms), X-Signature.
 # WAF가 python-requests 기본 User-Agent를 차단하므로 curl처럼 위장해서 보낸다.
+#
+# 【수수료 분석 탭 연동 보류 — 2026-09-16 재조사】
+# 문서 목차(1~13. 개요/시작하기/공통코드/상품/판매자/주문/클레임/이미지/문제해결/지원) 어디에도
+# 정산/수수료 전용 섹션이 없고, "수수료"라는 단어가 문서 전체(약 885KB)에 0건 등장한다.
+# 유일하게 관련 있어 보이는 건 11.1/11.2 주문 조회(get_sikbom_orders_by_date가 쓰는 바로 그
+# /v1/order-goods) 응답의 settlementInfo{settlementStatus, settlementAmount} 필드인데,
+# 실데이터로 검증해보니 settlementAmount는 수수료 차감액이 아니라 "반품 반영한 순수 주문 금액"
+# (단가×확정수량 + 배송비)일 뿐이다 — 예: 15개 주문 중 1개 반품 시 14개×3330원+배송비2500원=
+# 49120원이 정확히 settlementAmount와 일치, 수수료가 끼어들 여지가 없다.
+# 10.1 배송비 조회(GET /v1/seller/delivery-fees)도 이름 그대로 택배사 구간별 요금표일 뿐 수수료와
+# 무관하고 하위에 숨은 수수료 항목도 없다.
+# → 결론: 식봄 API는 수수료(커미션) 개념 자체를 제공하지 않으므로 fee_analysis.py(네이버/쿠팡처럼
+# "매출 대비 실제 수수료율" 계산) 연동은 이번에도 보류. 문서가 개편되지 않는 한 재조사 불필요.
 # ==========================================
 def get_cfg(key):
     try:

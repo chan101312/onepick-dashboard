@@ -717,7 +717,13 @@ def get_top5_orders():
             client = safe_decode(raw_client)
             client_no_space = client.replace(" ", "").lower()
             name = safe_decode(raw_name).strip()
-            
+
+            # 택배비/배송비 같은 부대비용 라인은 saleticketlist에 상품과 같은 형식으로 섞여
+            # 들어와서(STLJPName에 "택배비(공산품)" 식으로 찍힘) 이름 기준 집계만 하면 실제
+            # 상품처럼 순위에 오른다 — vvip-top20(12번 API)에서 이미 쓰던 제외 목록을 동일 적용.
+            excluded_keywords = ['택배비', '배송비', '아이스팩', '스티로폼', '광고비', '수수료', '정산', '기타']
+            if any(x in name for x in excluded_keywords): continue
+
             # 날짜 정제 (20260422 같은 형태에서 '2026-04'만 뽑아냄)
             date_str = safe_decode(raw_date).replace("-", "").replace(".", "").replace("/", "").strip()
             month_key = f"{date_str[:4]}-{date_str[4:6]}" if len(date_str) >= 6 else "기타"
