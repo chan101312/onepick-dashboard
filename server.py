@@ -39,6 +39,8 @@ from checklist import router as checklist_router
 from bgremove import router as bgremove_router
 # 💡 수수료분석 라우터 (정산 수수료 vs 예측 수수료) — fee_analysis.py 분리 모듈
 from fee_analysis import router as fee_analysis_router
+# 💡 단골손님 리스트 라우터 (채널 주문 수취인명 기준 구매횟수 집계) — customer_loyalty.py 분리 모듈
+from customer_loyalty import router as customer_loyalty_router
 
 app = FastAPI()
 app.include_router(reorder_router)
@@ -47,6 +49,7 @@ app.include_router(todos_router)
 app.include_router(checklist_router)
 app.include_router(bgremove_router)
 app.include_router(fee_analysis_router)
+app.include_router(customer_loyalty_router)
 
 
 # React와 통신 허가

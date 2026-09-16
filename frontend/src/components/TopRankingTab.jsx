@@ -72,6 +72,39 @@ export default function TopRankingTab() {
     return saved ? JSON.parse(saved) : { naver: 6.0, coupang: 11.0, baemin: 11.0, lotteon: 13.0, sikbom: 6.0 };
   });
 
+  const [loyaltyData, setLoyaltyData] = useState(null);
+  const [loyaltyError, setLoyaltyError] = useState(null);
+  const [loyaltyRefreshing, setLoyaltyRefreshing] = useState(false);
+
+  const fetchLoyalty = () => {
+    fetch(`${API_BASE}/api/customer-loyalty`, { headers: { 'ngrok-skip-browser-warning': '69420' } })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') { setLoyaltyData(data); setLoyaltyError(null); }
+        else setLoyaltyError(data.message);
+      })
+      .catch(() => setLoyaltyError('서버 통신 에러가 발생했습니다.'));
+  };
+
+  useEffect(() => { fetchLoyalty(); }, []);
+
+  const refreshLoyalty = async () => {
+    setLoyaltyRefreshing(true);
+    setLoyaltyError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/customer-loyalty/refresh`, {
+        method: 'POST', headers: { 'ngrok-skip-browser-warning': '69420' }
+      });
+      const data = await res.json();
+      if (data.status === 'success') setLoyaltyData(data);
+      else setLoyaltyError(data.message || '갱신에 실패했습니다.');
+    } catch (e) {
+      setLoyaltyError(`갱신 실패: 서버에 연결할 수 없습니다. (${e.message})`);
+    } finally {
+      setLoyaltyRefreshing(false);
+    }
+  };
+
   const marginLookup = useMemo(() => {
     const map = new Map();
     marginRows.forEach(row => {
@@ -262,6 +295,88 @@ export default function TopRankingTab() {
         {Object.keys(currentData).length === 0 && (
           <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: 'var(--text-3)', background: 'var(--panel)', borderRadius: '16px', border: '1px dashed var(--border)' }}>
             해당 월에 수집된 E상인 매출 데이터가 없습니다.
+          </div>
+        )}
+      </div>
+
+      {/* 🤝 단골손님 TOP 50 — 채널(쿠팡/식봄/네이버) 주문 수취인명 기준 구매횟수 집계 */}
+      <div className="ui-card" style={{
+        marginTop: '20px', background: 'var(--panel)', border: '1px solid var(--border)',
+        borderRadius: '16px', padding: '16px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Emoji>🤝</Emoji> 단골손님 TOP 50
+            </h3>
+            <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: 'var(--text-3)' }}>
+              * 채널 주문의 수취인명 기준 근사치입니다(동명이인·배송지 변경은 구분 못 함). 쿠팡·식봄은 최근 90일, 네이버는 최근 30일 기준.
+            </p>
+          </div>
+          <button
+            onClick={refreshLoyalty}
+            disabled={loyaltyRefreshing}
+            className="tab-cta-btn"
+            style={{ opacity: loyaltyRefreshing ? 0.6 : 1 }}
+          >
+            {loyaltyRefreshing ? '⏳ 조회 중…' : '🔄 갱신'}
+          </button>
+        </div>
+
+        {loyaltyData?.fetched_at && !loyaltyRefreshing && (
+          <p style={{ margin: '0 0 10px 0', fontSize: '11px', color: 'var(--text-3)' }}>
+            마지막 갱신: {String(loyaltyData.fetched_at).replace('T', ' ').slice(0, 16)}
+          </p>
+        )}
+
+        {loyaltyData?.warnings && loyaltyData.warnings.length > 0 && (
+          <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '12px', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 30%, transparent)' }}>
+            {loyaltyData.warnings.map((w, i) => (
+              <div key={i} style={{ fontSize: '12px', color: 'var(--amber)' }}><Emoji>⚠️</Emoji> {w}</div>
+            ))}
+          </div>
+        )}
+
+        {loyaltyError && (
+          <div style={{ color: 'var(--danger)', fontSize: '13px', padding: '10px 0' }}>
+            <Emoji>⚠️</Emoji> {loyaltyError}
+          </div>
+        )}
+
+        {loyaltyData?.customers && loyaltyData.customers.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-3)', textAlign: 'left' }}>
+                  <th style={{ padding: '6px 8px', width: '32px' }}>#</th>
+                  <th style={{ padding: '6px 8px' }}>수취인명</th>
+                  <th style={{ padding: '6px 8px' }}>구매횟수</th>
+                  <th style={{ padding: '6px 8px' }}>최근 주문일</th>
+                  <th style={{ padding: '6px 8px' }}>주력상품</th>
+                  <th style={{ padding: '6px 8px' }}>이용채널</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loyaltyData.customers.map((c, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{idx + 1}</td>
+                    <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>
+                      {c.name}{c.phone_hint && <span style={{ color: 'var(--text-3)', fontWeight: 'normal' }}> ({c.phone_hint})</span>}
+                    </td>
+                    <td style={{ padding: '6px 8px', fontWeight: 'bold', color: 'var(--accent)' }}>{c.count}회</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{c.last_order}</td>
+                    <td style={{ padding: '6px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{c.top_product}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{c.channels.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {loyaltyData?.customers && loyaltyData.customers.length === 0 && !loyaltyError && (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '14px' }}>
+            집계된 단골손님 데이터가 없습니다.
           </div>
         )}
       </div>

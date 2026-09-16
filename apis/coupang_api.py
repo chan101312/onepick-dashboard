@@ -70,11 +70,20 @@ def get_coupang_orders(start_date=None, end_date=None):
          주문이 결제완료(ACCEPT) 이후 상품준비중(INSTRUCT) 등으로 이미 넘어갔으면 전혀 안 잡혔음.
          (naver_api.get_new_orders()가 PAYED/DISPATCHED 두 상태를 순회 조회하는 것과 동일한 이유로
          여기서도 상태별로 반복 조회함.)
-    또한 최신 공식 문서가 v5 엔드포인트를 기준으로 안내하고 있어 v4→v5로 갱신함
-    (v4가 실제로 막힌 건지는 이 샌드박스에서 확인 못 했음 — 아래 DEBUG 로그로 실서버에서 확인 필요).
+    또한 최신 공식 문서가 v5 엔드포인트를 기준으로 안내하고 있어 v4→v5로 갱신함.
 
-    TODO: maxPerPage(최대 50)/nextToken 페이지네이션 처리가 없음 — 하루 주문이 50건을
-    넘으면 일부가 누락될 수 있음. 지금 버그(0건)를 먼저 해결하는 데 집중하느라 남겨둠.
+    ⚠️ 2026-09-16 실측으로 추가 발견 (단골손님 리스트 기능 조사 중): FINAL_DELIVERY(배송완료/
+    구매확정)가 빠져 있어서 주문이 배송완료 후 2일 정도만 지나도 이 함수로 전혀 안 잡혔다
+    (실측: 오늘/어제는 조회되는데 그저께부터는 0건 — ACCEPT~DELIVERING은 전부 "배송 진행 중"
+    상태라 완료되면 이 4개 버킷에서 빠져나감). FINAL_DELIVERY를 추가하니 6개월 전 데이터도
+    정상 조회됨(30일 전 17건/90일 전 50건/180일 전 24건 확인). 과거 주문을 조회해야 하는
+    호출부는 반드시 이 상태가 포함된 채로 호출해야 한다.
+    같은 조사에서 두 가지를 더 고쳤다:
+      - maxPerPage(최대 50)/nextToken 페이지네이션이 없어서 기간이 길어지면(90일 전 3일짜리
+        창에서만도 50건) 대부분 누락되고 있었음 — 페이지네이션 추가.
+      - createdAtFrom~createdAtTo가 32일 이상이면 400 에러
+        ("endTime-startTime range should less than 32 day")가 나서, 긴 기간은 31일짜리
+        구간으로 쪼개서 순차 조회하도록 함(식봄 API의 31일 제한과 동일 패턴).
     """
     if not all([VENDOR_ID, ACCESS_KEY, SECRET_KEY]):
         return []
@@ -85,68 +94,80 @@ def get_coupang_orders(start_date=None, end_date=None):
         start_date = (now - timedelta(days=3)).strftime("%Y-%m-%d")
     if not end_date:
         end_date = now.strftime("%Y-%m-%d")
-    # 공식 문서(paging by day) 형식: yyyy-mm-dd+09:00 → URL에는 %2B로 인코딩해서 보냄
-    created_from = f"{start_date}%2B09:00"
-    created_to = f"{end_date}%2B09:00"
+
+    MAX_WINDOW_DAYS = 31
+    start_d = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_d = datetime.strptime(end_date, "%Y-%m-%d").date()
 
     result = []
     seen_keys = set()
 
-    # status는 필수 파라미터라 상태별로 각각 조회해야 함
-    for status in ["ACCEPT", "INSTRUCT", "DEPARTURE", "DELIVERING"]:
-        query = f"createdAtFrom={created_from}&createdAtTo={created_to}&status={status}"
-        uri = f"/v2/providers/openapi/apis/api/v5/vendors/{VENDOR_ID}/ordersheets?{query}"
-        url = f"https://api-gateway.coupang.com{uri}"
+    window_start = start_d
+    while window_start <= end_d:
+        window_end = min(end_d, window_start + timedelta(days=MAX_WINDOW_DAYS - 1))
+        # 공식 문서(paging by day) 형식: yyyy-mm-dd+09:00 → URL에는 %2B로 인코딩해서 보냄
+        created_from = f"{window_start.isoformat()}%2B09:00"
+        created_to = f"{window_end.isoformat()}%2B09:00"
 
-        auth_header = generate_coupang_signature("GET", uri)
-        headers = {"Authorization": auth_header, "Content-Type": "application/json;charset=UTF-8", "Accept": "application/json"}
+        # status는 필수 파라미터라 상태별로 각각 조회해야 함
+        for status in ["ACCEPT", "INSTRUCT", "DEPARTURE", "DELIVERING", "FINAL_DELIVERY"]:
+            next_token = ""
+            while True:
+                query = f"createdAtFrom={created_from}&createdAtTo={created_to}&status={status}&maxPerPage=50"
+                if next_token:
+                    query += f"&nextToken={next_token}"
+                uri = f"/v2/providers/openapi/apis/api/v5/vendors/{VENDOR_ID}/ordersheets?{query}"
+                url = f"https://api-gateway.coupang.com{uri}"
 
-        res = _request("GET", url, headers=headers)
+                auth_header = generate_coupang_signature("GET", uri)
+                headers = {"Authorization": auth_header, "Content-Type": "application/json;charset=UTF-8", "Accept": "application/json"}
 
-        # 🐛 DEBUG (임시): 실제 쿠팡 API 원본 응답을 그대로 찍어서 어디서 걸러지는지 확인용.
-        # 원인 파악 끝나면 이 블록은 지울 것.
-        print(f"[DEBUG coupang] status={status} uri={uri}")
-        print(f"[DEBUG coupang] status_code={res.status_code} body={res.text[:800]}")
+                res = _request("GET", url, headers=headers)
+                if res.status_code != 200:
+                    print(f"[쿠팡 주문조회] status={status} ({window_start}~{window_end}) 조회 실패: HTTP {res.status_code} — {res.text[:300]}")
+                    break
 
-        if res.status_code != 200:
-            print(f"[쿠팡 주문조회] status={status} 조회 실패: HTTP {res.status_code} — {res.text[:300]}")
-            continue
+                data = res.json()
+                for order in data.get('data', []):
+                    ordered_at = order.get('orderedAt', '')[:16].replace("T", " ")
+                    # v4→v5 갱신 과정에서 receiver 관련 필드가 order 바로 아래 평평한 키
+                    # (receiverName 등)가 아니라 order['receiver'] 안에 중첩된 구조로 바뀌었는데
+                    # 여기가 안 따라가서 지금까지 전부 빈 문자열만 나오고 있었다.
+                    receiver_info = order.get('receiver', {}) or {}
+                    receiver = receiver_info.get('name', '')
+                    tel = receiver_info.get('safeNumber', '') or order.get('orderer', {}).get('safeNumber', '')
+                    addr = f"{receiver_info.get('addr1', '')} {receiver_info.get('addr2', '')}"
+                    memo = order.get('shippingMemo', '')
 
-        data = res.json()
-        for order in data.get('data', []):
-            ordered_at = order.get('orderedAt', '')[:16].replace("T", " ")
-            # v4→v5 갱신 과정에서 receiver 관련 필드가 order 바로 아래 평평한 키
-            # (receiverName 등)가 아니라 order['receiver'] 안에 중첩된 구조로 바뀌었는데
-            # 여기가 안 따라가서 지금까지 전부 빈 문자열만 나오고 있었다.
-            receiver_info = order.get('receiver', {}) or {}
-            receiver = receiver_info.get('name', '')
-            tel = receiver_info.get('safeNumber', '') or order.get('orderer', {}).get('safeNumber', '')
-            addr = f"{receiver_info.get('addr1', '')} {receiver_info.get('addr2', '')}"
-            memo = order.get('shippingMemo', '')
+                    for item in order.get('orderItems', []):
+                        key = (str(order.get('orderId', '')), str(item.get('vendorItemId', '')))
+                        if key in seen_keys:
+                            continue  # 같은 주문이 여러 status 조회에 중복으로 안 걸리게
+                        seen_keys.add(key)
+                        shipping_count = item.get('shippingCount', 0)
+                        if shipping_count <= 0:
+                            continue  # 전량 취소된 품목(cancelCount로 전부 상쇄) — 대조 대상에서 제외
+                        result.append({
+                            "마켓": "쿠팡",
+                            "결제일시": ordered_at,
+                            "주문상태": status,  # 조회에 쓰인 상태 버킷 = 현재 상태
+                            "주문번호": str(order.get('orderId', '')),
+                            "상품주문번호": str(item.get('vendorItemId', '')),
+                            "상품명": item.get('vendorItemName', ''),
+                            "옵션명": item.get('vendorItemPackageName', ''),
+                            "수량": item.get('shippingCount', 0),
+                            "수취인명": receiver,
+                            "연락처": tel,
+                            "배송지": addr,
+                            "배송메시지": memo,
+                            "결제금액": item.get('orderPrice', 0)
+                        })
 
-            for item in order.get('orderItems', []):
-                key = (str(order.get('orderId', '')), str(item.get('vendorItemId', '')))
-                if key in seen_keys:
-                    continue  # 같은 주문이 여러 status 조회에 중복으로 안 걸리게
-                seen_keys.add(key)
-                shipping_count = item.get('shippingCount', 0)
-                if shipping_count <= 0:
-                    continue  # 전량 취소된 품목(cancelCount로 전부 상쇄) — 대조 대상에서 제외
-                result.append({
-                    "마켓": "쿠팡",
-                    "결제일시": ordered_at,
-                    "주문상태": status,  # ACCEPT(결제완료)/INSTRUCT(상품준비중)/DEPARTURE/DELIVERING — 조회에 쓰인 상태 버킷 = 현재 상태
-                    "주문번호": str(order.get('orderId', '')),
-                    "상품주문번호": str(item.get('vendorItemId', '')),
-                    "상품명": item.get('vendorItemName', ''),
-                    "옵션명": item.get('vendorItemPackageName', ''),
-                    "수량": item.get('shippingCount', 0),
-                    "수취인명": receiver,
-                    "연락처": tel,
-                    "배송지": addr,
-                    "배송메시지": memo,
-                    "결제금액": item.get('orderPrice', 0)
-                })
+                next_token = data.get('nextToken') or ""
+                if not next_token:
+                    break
+
+        window_start = window_end + timedelta(days=1)
 
     result.sort(key=lambda x: x['결제일시'], reverse=True)
     return result
